@@ -304,9 +304,9 @@ def filter_toks(tokens, min_y, max_y_dist):
         return tokens
 
     prev_top, prev_bottom = 0, min_y
-    new_ranges = [[prev_top, prev_bottom]]
+    new_ranges = []
     for row_top, row_bottom in row_ranges:
-        if row_top - prev_bottom > max_y_dist:
+        if abs(row_top - prev_bottom) > max_y_dist:
             break
         else:
             new_ranges.append([row_top, row_bottom])
