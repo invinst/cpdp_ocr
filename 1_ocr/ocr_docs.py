@@ -19,10 +19,15 @@ out_dir = '/opt/data/cpdp_pdfs/ocrd'
 
 def ocr_page(page_image=None, fp=None):
     if fp:
-        page_image = cv2.imread(page_image)
+        page_image = cv2.imread(fp)
+        return ocr_page(page_image)
 
-    page_str = pytesseract.image_to_string(page_image)
-    page_data = pytesseract.image_to_data(page_image)
+    try:
+        page_str = pytesseract.image_to_string(page_image)
+        page_data = pytesseract.image_to_data(page_image)
+    except:
+        print("Page not tesseractable: ")
+        return None, None
 
     return page_str, page_data
 
@@ -67,12 +72,11 @@ def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
         cimg = np.zeros_like(raw_image)
         #draw white boxes on top of redaction boxes. second draw handles edges.
         cv2.drawContours(raw_image, redaction_contours, i, color=(255,255,255), thickness=cv2.FILLED)
-        cv2.drawContours(raw_image, redaction_contours, i, color=(255,255,255), thickness=3)
+        cv2.drawContours(raw_image, redaction_contours, i, color=(255,255,255), thickness=4)
 
     return raw_image
 
 def ocr_file(path, pages=[], brightness=30, contrast=30, no_redactions=True):
-
     file_basename = os.path.basename(path)
     pdf_outdir = '{}/{}'.format(out_dir, file_basename)
     print("Attempting to create ", pdf_outdir)
@@ -83,6 +87,7 @@ def ocr_file(path, pages=[], brightness=30, contrast=30, no_redactions=True):
         print("Created directory, ", pdf_outdir)
     except:
         print("Directory already made: {}".format(pdf_outdir))
+        return
 
     page_images = convert_from_path(path)
     page_num = 1
@@ -99,6 +104,10 @@ def ocr_file(path, pages=[], brightness=30, contrast=30, no_redactions=True):
             continue
 
         unstructured_text, structured_text = ocr_page(page_image)
+        if not unstructured_text or not structured_text:
+            print('[ERROR]', path, 'could not be tesseracted correctly')
+            continue
+
         out_fp = '{}/{}.{}.{}'.format(pdf_outdir, file_basename, page_num, 'tsv')
         print(out_fp)
         with open(out_fp, 'w') as fh:
@@ -119,6 +128,8 @@ def ocr_file(path, pages=[], brightness=30, contrast=30, no_redactions=True):
 
 if __name__ == '__main__':
     raw_pdf_path = '/opt/data/cpdp_pdfs/pdfs'
+    if os.path.exists('/dev/shm/pdfs'):
+        raw_pdf_path = '/dev/shm/pdfs'
 
     if len(argv) == 1:
         pdfs = ['{}/{}'.format(raw_pdf_path, f) for f in os.listdir(raw_pdf_path)]
@@ -147,4 +158,4 @@ if __name__ == '__main__':
             pdfs.append(pdf_path)
    
     pool = Pool(processes=8)
-    results = pool.map(ocr_file, pdfs)
+    results = pool.imap_unordered(ocr_file, pdfs, chunksize=32)

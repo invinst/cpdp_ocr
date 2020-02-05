@@ -238,11 +238,6 @@ def identify_doc_type(pdf_name, page_num=1, filename=None):
     if not lines:
         return
 
-    #oneoffs
-    #if nlevenstein.distance(' '.join(lines[0].split()[:5]).lower(), 'auto cr - log summary') <= .15:
-    #    return 'Summary Report'
-
-
     #key mapping
     for startswith_text, normalized_docname in startswith_map:
         startswith_text = startswith_text.lower()
@@ -292,15 +287,26 @@ def tag_pdf(pdf_name, begin, end, log_id, filename):
     ocrd_path = '{}/{}'.format(PDFSPATH, pdf_name)
     pdf_path = '/opt/data/cpdp_pdfs/pdfs/{}'.format(pdf_name)
 
-    fps = os.listdir(ocrd_path)
+    try:
+        fps = os.listdir(ocrd_path)
+    except:
+        print("Directory for {} not found. Skipping".format(ocrd_path))
+        return
+
     txt_files = [p for p in fps if p.endswith('.txt')]
     img_files = [p for p in fps if p.endswith('.png')]
 
-    cr_id = int(re.split('[_.]', log_id)[1])
+    if not log_id:
+        cr_id = 0
+    else:
+        cr_id = int(re.split('[_.]', log_id)[1])
 
     tagged_pages = []
     for txt_file in txt_files:
-        page_num = int(txt_file.split('.')[-2])
+        try:
+            page_num = int(txt_file.split('.')[-2])
+        except:
+            print(page_num)
         doc_type = identify_doc_type(pdf_name, page_num, filename) 
 
         if doc_type:
@@ -311,56 +317,56 @@ def tag_pdf(pdf_name, begin, end, log_id, filename):
 
     return tagged_pages
 
-pdf_names = os.listdir(PDFSPATH)
-file_ranges_csv = 'input/cr_ranges.csv'
+if __name__ == '__main__':
+    pdf_names = os.listdir(PDFSPATH)
+    file_ranges_csv = 'input/cr_ranges.csv'
 
+    pdf_crids = {}
+    tagged_pdfs = []
+    tagged_pages = []
+    
+    tag_params = []
+    
+    with open(file_ranges_csv) as fh:
+        reader = csv.DictReader(fh)
+        for line in [i for i in reader]:
+            pdf_name = '{}.pdf'.format(line['begin'])
+            begin_num = int(line['begin'].split()[1])
+            #end_num = int(line['end'].split()[1])
+            end_num=0
+   
+            tag_params.append((pdf_name, begin_num, end_num, line['log_id'], line['filename']))
+   # 
+   #         tagged = tag_pdf(pdf_name, begin_num, end_num, line['log_id'], line['filename'])
+   #         if not tagged:
+   #             continue
+#
+#            for page in tagged:
+#                tagged_pages.append(page)
+#    
+#            tagged_pdfs.append(tagged)
+    
+    from multiprocessing import Pool
+    pool = Pool(processes=14)
+   
 
-pdf_crids = {}
-tagged_pdfs = []
-tagged_pages = []
+    results = pool.starmap(tag_pdf, tag_params, chunksize=8)
+    print(results)
+    
+    with open('output/tagged_pages.csv', 'w') as fh:
+        w = csv.DictWriter(fh, fieldnames=results[0][0].keys())
+        w.writeheader()
+    
+        [w.writerows(p) for p in results]
 
-tag_params = []
-
-with open(file_ranges_csv) as fh:
-    reader = csv.DictReader(fh)
-    count = 0
-    for line in reader:
-        if count > 2000:
-            break
-        
-        pdf_name = '{}.pdf'.format(line['begin'])
-        begin_num = int(line['begin'].split()[1])
-        end_num = int(line['end'].split()[1])
-
-        tag_params.append((pdf_name, begin_num, end_num, line['log_id'], line['filename']))
-
-        count += 1
-
-        tagged = tag_pdf(pdf_name, begin_num, end_num, line['log_id'], line['filename'])
-        for page in tagged:
-            tagged_pages.append(page)
-
-        tagged_pdfs.append(tagged)
-
-from multiprocessing import Pool
-pool = Pool(processes=14)
-
-results = pool.starmap(tag_pdf, tag_params)
-
-with open('output/tagged_pages.csv', 'w') as fh:
-    w = csv.DictWriter(fh, fieldnames=['pdf_name','page_num','doc_type','cr_id'])
-    w.writeheader()
-
-    w.writerows(tagged_pages)
-
-pdfs_no_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and not any([p['doc_type'] for p in pages])]
-pdfs_some_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and any([p['doc_type'] for p in pages])]
-pdfs_all_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and all([p['doc_type'] for p in pages])]
-pdfs_firstpage_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and pages[0]['doc_type']]
-print('PDFs with no tags: ', len(pdfs_no_tags))
-print('PDFs with some tags: ', len(pdfs_some_tags))
-print('PDFs with all tags: ', len(pdfs_all_tags))
-print('PDFs with firstpage tags: ', len(pdfs_firstpage_tags))
-
-print('Pages with tags: ', len([i for i in tagged_pages if i['doc_type']]))
-print('Pages with no tags: ', len([i for i in tagged_pages if not i['doc_type']]))
+    pdfs_no_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and not any([p['doc_type'] for p in pages])]
+    pdfs_some_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and any([p['doc_type'] for p in pages])]
+    pdfs_all_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and all([p['doc_type'] for p in pages])]
+    pdfs_firstpage_tags = [pages[0]['pdf_name'] for pages in tagged_pdfs if pages and pages[0]['doc_type']]
+    print('PDFs with no tags: ', len(pdfs_no_tags))
+    print('PDFs with some tags: ', len(pdfs_some_tags))
+    print('PDFs with all tags: ', len(pdfs_all_tags))
+    print('PDFs with firstpage tags: ', len(pdfs_firstpage_tags))
+    
+    print('Pages with tags: ', len([i for i in tagged_pages if i['doc_type']]))
+    print('Pages with no tags: ', len([i for i in tagged_pages if not i['doc_type']]))
