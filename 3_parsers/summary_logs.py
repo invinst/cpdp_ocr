@@ -2,6 +2,7 @@
 
 import re
 import csv
+import json
 
 from strsimpy.normalized_levenshtein import NormalizedLevenshtein
 
@@ -35,6 +36,14 @@ col_based_headers = {
 #these are not being used yet.
 row_based_headers  = ['Incident Details', [['CR Required?', 'Confidential?', 'Extraordinary Occurence', 'Police Shooting (U)?', 'Non Disciplinary Intervention:', 'Initial Assignment:', 'Notify IAD Immediately?', 'EEO Complaint No.:', 'Civil Suit No.:', 'Notify Chief Administator', 'Notify Coordinator?', 'Notification Other?', 'Notification Comments:'], ['Manner Incident Received?', 'Biased Language?', 'Bias Based Profiling?', 'Alcohol Related?', 'Pursuit Related?', 'Violence in Workplace?', 'Domestic Violence?', 'Civil Suit Settled Date:', 'Notify Chief?', 'Notification Does Not Apply?']]]
 
+#narrative_fields = [
+#        ['Incident Finding / Overall Case Finding', ['Description of Incident', 'Finding']],
+#        ['G
+#        ]
+
+def tokens_to_text(tokens, join_str=' '):
+    return join_str.join([t['text'] for t in tokens]).strip()
+
 def find_label(label_txt, tokens):
     #get text that matches token of label to narrow location
     possible_blocks = []
@@ -64,7 +73,7 @@ def find_label(label_txt, tokens):
             block_lines[(line_num, par_num)].append(token)
 
         for _, line_toks in block_lines.items():
-            if ' '.join([tok['text'] for tok in line_toks]).strip() == label_txt:
+            if tokens_to_text(line_toks) == label_txt:
                 [label_tokens.append(t) for t in line_toks]
                 break
 
@@ -124,24 +133,29 @@ def lines_from_tokens(tokens):
         if token['text']:
             lines[line_key].append(token)
 
-    #lines.sort(key=lambda l: l['word_num'])
     return list(lines.values())
+    
 
-def last_column_header_bounds(tokens, col_key='Initial / Intake Allegation'):
+def last_column_header_bounds(tokens, col_key, threshold=.85):
     levenshtein = NormalizedLevenshtein()
 
     lines = lines_from_tokens(tokens)
+
     potential_tokens = [[]]
 
-    for line in lines:
-        lowest_distance = 2 #
-
+    for line_num in range(0, len(lines)):
+        line = lines[line_num]
+        lowest_distance = 2 #not a valid distance
+        
         for line_token in line[::-1]:
-            prev_potential_str = ' '.join([t['text'] for t in potential_tokens[-1]])
+            prev_potential_str = tokens_to_text(potential_tokens[-1])
+            prev_key_dist = levenshtein.distance(prev_potential_str, col_key)
+
             potential_str = line_token['text'] + ' ' + prev_potential_str
             
             key_dist = levenshtein.distance(potential_str, col_key)
-            if key_dist < lowest_distance:
+
+            if key_dist < lowest_distance and key_dist < prev_key_dist:
                 lowest_distance = key_dist
                 potential_tokens[-1].insert(0, line_token)
 
@@ -150,17 +164,47 @@ def last_column_header_bounds(tokens, col_key='Initial / Intake Allegation'):
 
         potential_tokens.append([])
 
+    highest_toks = []
+    for pot_toks in potential_tokens:
+        orig_text = tokens_to_text(pot_toks)
+        orig_dist = levenshtein.distance(col_key, orig_text)
+        lowest_dist = 2
+        lowest_toks = None
+
+        for tok_idx in range(0, len(pot_toks)):
+            sample_toks = pot_toks[-(tok_idx+1):]
+            dist = levenshtein.distance(col_key, tokens_to_text(sample_toks))
+            if dist < lowest_dist:
+                lowest_dist = dist
+                lowest_toks = sample_toks
+
+        if lowest_toks:
+            highest_toks.append(lowest_toks)
+
+    potential_tokens = highest_toks
+
+    potential_tokens_combined = []
+    for p1 in range(len(highest_toks)):
+        tmp_combined = []
+        for p2 in range(len(potential_tokens)):
+            if p2 <= p1:
+                continue
+
+            tmp_combined += potential_tokens[p1]
+            tmp_combined += potential_tokens[p2]
+        potential_tokens_combined.append(tmp_combined)
+
     most_similar = []
     lowest_dist = 2
-    for tokens in potential_tokens:
+    for tokens in potential_tokens + potential_tokens_combined:
         joined_str = ' '.join([t['text'] for t in tokens])
         key_dist = levenshtein.distance(joined_str, col_key)
 
-        if key_dist <= lowest_dist:
+        if key_dist < lowest_dist:
             lowest_dist = key_dist
             most_similar = tokens
 
-    if most_similar:
+    if most_similar: #and lowest_distance < threshold:
         left_point = min([t['left'] for t in most_similar])
         bottom_point = min([t['top'] + t['height'] for t in most_similar])
         top_point = max([t['top'] for t in most_similar])
@@ -172,108 +216,11 @@ def last_column_header_bounds(tokens, col_key='Initial / Intake Allegation'):
         top_point = 0
         right_point = 0
 
+
+    col_str = ' '.join([t['text'] for t in most_similar])
+
+    #print(col_key,':', col_str, lowest_dist, left_point, right_point, top_point, bottom_point)
     return left_point, right_point, top_point, bottom_point
-
-def tokens_column_intervals(tokens, headers=None, threshold=10):
-    col_intervals = sorted([[t['left'], t['left'] + t['width']] for t in tokens if t['conf'] > .2])
-
-    farthest_left = min([t['left'] for t in tokens])
-    farthest_right = max([(t['left'] + t['width']) for t in tokens])
-
-    if not col_intervals:
-        return []
-
-    col_intervals.sort(key=lambda interval: interval[0])
-
-    column_ranges = [col_intervals[0]]
-    for current in col_intervals[1:]:
-        assert len(current) == 2
-
-        previous = column_ranges[-1]
-        xdiff = abs(current[0] - previous[1])
-        if xdiff > threshold:
-            previous[1] = max(previous[1], current[1])
-        else:
-            column_ranges.append(current)
-
-    column_ranges.sort(key=lambda interval: interval[0])
-    column_ranges.insert(0, (0, farthest_left-1))
-    column_ranges.insert(len(column_ranges), (farthest_right, 9999))
-
-    return column_ranges
-
-def extract_table_header(tokens, fieldnames, threshold=5):
-    token_intervals
-
-def extract_table_rows(tokens):
-    """Requires that all tokens are already in some sort of columnar structure"""
-
-    lines = lines_from_tokens(tokens)
-
-    thresh = 5
-    within_range = []
-
-    column_ranges = tokens_column_intervals(tokens)
-
-    if not column_ranges:
-        return []
-
-    #creates acceptable ranges for columns
-    row_intervals = sorted([[t['top']-5, t['top'] + t['height']+ 5] for t in tokens if t['conf'] > .2])
-
-    row_intervals.sort(key=lambda interval: interval[0])
-    row_ranges = [row_intervals[0]]
-    for current in row_intervals:
-        previous = row_ranges[-1]
-        if current[0] - previous[1] > 45:
-            continue
-        if current[0] <= previous[1]:
-            previous[1] = max(previous[1], current[1])
-        else:
-            row_ranges.append(current)
-
-    rows = []
-    for row_top, row_bottom in row_ranges:
-        row = []
-        for token in tokens:
-            if token['top'] >= row_top and (token['top'] + token['height']) <= row_bottom:
-                row.append(token)
-
-        rows.append(row)
-
-    columns = []
-    for col_left, col_right in column_ranges:
-        column = []
-        for token in tokens:
-            if token['left'] >= col_left and (token['left'] + token['width']) <= col_right:
-                column.append(token)
-
-        columns.append(column)
-
-    row_cols = [[[] for r in columns ] for i in rows]
-    for col_num in range(0, len(column_ranges)):
-        col_left, col_right = column_ranges[col_num]
-        for row_num in range(0, len(rows)):
-            for row_token in rows[row_num]:
-                row_right = row_token['left'] + row_token['width']
-                if row_token['left'] >= col_left and row_right <= col_right:
-                    row_cols[row_num][col_num].append(row_token)
-
-    #define headers
-    headers = [' '.join([c['text'] for c in col if c['conf'] > 50]).strip() for col in row_cols[0]]
-
-    rows_results = []
-    for row in row_cols[1:]: #skip header
-        row_dict = {}
-        col_num = 0
-        for cols in row:
-            col_field = headers[col_num]
-            row_dict[col_field] = ' '.join([t['text'] for t in cols if t['text']]).strip()
-
-            col_num += 1
-        rows_results.append(row_dict)
-
-    return rows_results
 
 def normalize_row(row):
     new_row = {}
@@ -311,7 +258,6 @@ def filter_toks(tokens, min_y, max_y_dist):
         else:
             new_ranges.append([row_top, row_bottom])
             prev_top, prev_bottom = row_top, row_bottom
-
 
     new_tokens = []
     for token in tokens:
@@ -390,6 +336,8 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
         prev_top = top
 
     label_tokens = {}
+
+    sections = []
     for label, top, bottom in section_positions:
         #grab label's bottom to remove from set of tokens
         label_bottom = [b[3] for l,b in label_boundaries if l == label][0]
@@ -402,14 +350,22 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
 
         #iterate through each potential column header, going backwards
         label_columns = {}
+
+        is_first = True 
+        section_columns = []
         for col_name in col_based_headers[label][::-1]:
+            #if col_name != 'Comments':
+            #    continue
             header_bounds = last_column_header_bounds(section_tokens, col_name)
             header_left, header_right, header_top, header_bottom = header_bounds
+
+            if is_first:
+                header_right = page_width
 
             if not header_left:
                 continue
 
-            column_tokens = tokens_in_bounds(header_left-3, page_width, header_bottom, bottom, section_tokens)
+            column_tokens = tokens_in_bounds(header_left, header_right, header_bottom, bottom, section_tokens)
             column_lines = lines_from_tokens(column_tokens)
 
             label_columns[col_name] = []
@@ -418,13 +374,41 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
                     label_columns[col_name].append(tok)
 
             label_columns[col_name] = filter_toks(label_columns[col_name], min_y=header_bottom, max_y_dist=100)
+            prev_left = header_left
+            section_tokens = tokens_in_bounds(0, header_left, label_bottom, bottom, tokens)
 
-            if label == 'Accused Members':
-    #            ret_lines = lines_from_tokens(label_columns[col_name])
-                ret_text = ' '.join([t['text'] for t in label_columns[col_name] if t['text']])
+            ret_lines = lines_from_tokens(label_columns[col_name])
 
-                if ret_text:
-                    return pdf_num, pdf_page, ret_text
+            ret_text = ''
+            line_strs = []
+            for line in ret_lines:
+                line_strs.append(' '.join([l['text'] for l in line]))
+
+            ret_text = '\n'.join(line_strs)
+
+            column = {
+                    'col_name': col_name,
+                    'col_text': ret_text,
+                    #'bounds': {
+                    #'x1': header_left,
+                    #'x2': header_right,
+                    #'y1': header_top,
+                    #'y2': header_bottom}
+                    }
+            section_columns.append(column)
+
+
+        sections_dict = {
+                'section_name': label,
+                'columns': section_columns
+                }
+        sections.append(sections_dict)
+
+    ret_dict = {'pdf_num': pdf_num, 'page_num':pdf_page, 'sections': sections}
+
+    print(json.dumps(ret_dict))
+
+    return ret_dict
 
 if __name__ == '__main__':
     params = []
