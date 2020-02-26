@@ -125,7 +125,7 @@ def lines_from_tokens(tokens):
     #extract readable lines from tokens, from tesseract tsv 'line' field
     lines = {}
     for token in tokens:
-        line_key = (token['line_num'], token['par_num'], token['block_num'])
+        line_key = (token['block_num'], token['par_num'], token['line_num'])
         if line_key not in lines:
             lines[line_key] = []
 
@@ -133,10 +133,27 @@ def lines_from_tokens(tokens):
         if token['text']:
             lines[line_key].append(token)
 
-    return list(lines.values())
-    
+    #already_used = []
+    #ret = []
+    #for token in tokens:
+    #    line_key = (token['line_num'], token['par_num'], token['block_num'])
+    #    if line_key in already_used:
+    #        continue
+    #    else:
+    #        already_used.append(line_key)
+#
+#        ret.append(lines[line_key])
 
-def last_column_header_bounds(tokens, col_key, threshold=.85):
+    #return ret
+    return list(lines.values())
+
+def last_column_header_bounds(tokens, col_key, threshold=.4):
+    """The powerhouse of the script. Need to cleanup and document"""
+
+    if not col_key:
+        print('yo wtf this about')
+        return
+
     levenshtein = NormalizedLevenshtein()
 
     lines = lines_from_tokens(tokens)
@@ -145,7 +162,9 @@ def last_column_header_bounds(tokens, col_key, threshold=.85):
 
     for line_num in range(0, len(lines)):
         line = lines[line_num]
-        lowest_distance = 2 #not a valid distance
+        if col_key == 'Status':
+            print('HMM', tokens_to_text(line))
+        lowest_distance = 2 #distance will always be lower than this
         
         for line_token in line[::-1]:
             prev_potential_str = tokens_to_text(potential_tokens[-1])
@@ -155,7 +174,12 @@ def last_column_header_bounds(tokens, col_key, threshold=.85):
             
             key_dist = levenshtein.distance(potential_str, col_key)
 
-            if key_dist < lowest_distance and key_dist < prev_key_dist:
+            len_diff = abs(len(potential_str) - len(col_key)) / len(col_key) 
+
+            if key_dist < prev_key_dist:
+                #if  key_dist < threshold and len_diff < .15:
+                #    break
+
                 lowest_distance = key_dist
                 potential_tokens[-1].insert(0, line_token)
 
@@ -183,24 +207,33 @@ def last_column_header_bounds(tokens, col_key, threshold=.85):
 
     potential_tokens = highest_toks
 
+    #if col_key in col_based_headers['Attachments']:
+    if col_key == 'Status':
+        print('highest tokens', set([tokens_to_text(h) for h in highest_toks ]))
+
     potential_tokens_combined = []
     for p1 in range(len(highest_toks)):
         tmp_combined = []
-        for p2 in range(len(potential_tokens)):
+        for p2 in range(len(highest_toks)):
             if p2 <= p1:
                 continue
 
-            tmp_combined += potential_tokens[p1]
-            tmp_combined += potential_tokens[p2]
+            tmp_combined += highest_toks[p1]
+            tmp_combined += highest_toks[p2]
         potential_tokens_combined.append(tmp_combined)
 
     most_similar = []
     lowest_dist = 2
-    for tokens in potential_tokens + potential_tokens_combined:
-        joined_str = ' '.join([t['text'] for t in tokens])
+    for tokens in highest_toks + potential_tokens_combined:
+        joined_str = tokens_to_text(tokens)
+
+            
         key_dist = levenshtein.distance(joined_str, col_key)
 
         if key_dist < lowest_dist:
+            #if col_key in col_based_headers['Attachments']:
+            if col_key == 'Status':
+                print('hmm', joined_str)
             lowest_dist = key_dist
             most_similar = tokens
 
@@ -216,10 +249,10 @@ def last_column_header_bounds(tokens, col_key, threshold=.85):
         top_point = 0
         right_point = 0
 
-
     col_str = ' '.join([t['text'] for t in most_similar])
 
-    #print(col_key,':', col_str, lowest_dist, left_point, right_point, top_point, bottom_point)
+    print('col bounds: ', col_key, left_point, right_point, top_point, bottom_point)
+
     return left_point, right_point, top_point, bottom_point
 
 def normalize_row(row):
@@ -312,7 +345,7 @@ def tsv_data(pdf_num, pdf_page, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
 
     return tokens, fieldnames
 
-def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
+def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
     tokens, tsv_fieldnames = tsv_data(pdf_num, pdf_page, ocrd_dir=ocrd_dir)
     if not tokens:
         return
@@ -322,25 +355,31 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
 
     #must be a list to preserve order. consider using ordereddict
     label_boundaries = [(i, find_label(i, tokens)) for i in col_based_headers.keys()]
+    label_boundaries = [(l, b) for l,b in label_boundaries if b[2]]
+    
+    section_tops = sorted([bounds[2] for key,bounds in label_boundaries if bounds[2]])
+    section_tops.append(page_height)
+    
+    section_boundaries = []
+    for label, label_bounds in label_boundaries:
+        section_top = label_bounds[2]
 
-    #move backwards and find boundaries between sections. labels *should* be in order
-    prev_top = page_height
-    section_positions = []
-
-    for label, boundaries in label_boundaries[::-1]:
-        _, _, top, _, width, _ = boundaries
-        if not top or not width:
+        if section_top not in section_tops:
+            print("yo wtf this shouldnt happen")
             continue
 
-        section_positions.append([label, top, prev_top])
-        prev_top = top
+        top_idx = section_tops.index(section_top)
+
+        section_bot = section_tops[top_idx + 1]
+        section_boundaries.append([label, section_top, section_bot])
 
     label_tokens = {}
 
     sections = []
-    for label, top, bottom in section_positions:
+    for label, top, bottom in section_boundaries:
         #grab label's bottom to remove from set of tokens
         label_bottom = [b[3] for l,b in label_boundaries if l == label][0]
+        label_top = [b[2] for l,b in label_boundaries if l == label][0]
 
         min_left = 0
         min_right = page_width
@@ -353,19 +392,18 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
 
         is_first = True 
         section_columns = []
+        prev_left = page_width
+        prev_right = None
         for col_name in col_based_headers[label][::-1]:
-            #if col_name != 'Comments':
-            #    continue
             header_bounds = last_column_header_bounds(section_tokens, col_name)
+            if not header_bounds:
+                break
+            if col_name in col_based_headers['Attachments']:
+                print(col_name, header_bounds)
+
             header_left, header_right, header_top, header_bottom = header_bounds
 
-            if is_first:
-                header_right = page_width
-
-            if not header_left:
-                continue
-
-            column_tokens = tokens_in_bounds(header_left, header_right, header_bottom, bottom, section_tokens)
+            column_tokens = tokens_in_bounds(header_left, prev_left, header_bottom, bottom, section_tokens)
             column_lines = lines_from_tokens(column_tokens)
 
             label_columns[col_name] = []
@@ -373,9 +411,8 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
                 for tok in line:
                     label_columns[col_name].append(tok)
 
-            label_columns[col_name] = filter_toks(label_columns[col_name], min_y=header_bottom, max_y_dist=100)
-            prev_left = header_left
-            section_tokens = tokens_in_bounds(0, header_left, label_bottom, bottom, tokens)
+            label_columns[col_name] = filter_toks(label_columns[col_name], min_y=header_top, max_y_dist=9999)
+            section_tokens = tokens_in_bounds(0, prev_left, label_bottom, bottom, tokens)
 
             ret_lines = lines_from_tokens(label_columns[col_name])
 
@@ -386,17 +423,14 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
 
             ret_text = '\n'.join(line_strs)
 
-            column = {
-                    'col_name': col_name,
-                    'col_text': ret_text,
-                    #'bounds': {
-                    #'x1': header_left,
-                    #'x2': header_right,
-                    #'y1': header_top,
-                    #'y2': header_bottom}
-                    }
-            section_columns.append(column)
+            if not ret_text or label == 'Incident Details':
+                continue
 
+
+            column = {'col_name': col_name, 'col_text': ret_text}
+            section_columns.append(column)
+            prev_left = header_left
+            prev_right = header_right
 
         sections_dict = {
                 'section_name': label,
@@ -404,9 +438,10 @@ def parse_tsv_data(pdf_num, pdf_page=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
                 }
         sections.append(sections_dict)
 
-    ret_dict = {'pdf_num': pdf_num, 'page_num':pdf_page, 'sections': sections}
+    if not sections:
+        return None
 
-    print(json.dumps(ret_dict))
+    ret_dict = {'pdf_num': pdf_num, 'page_num':pdf_page, 'sections': sections, 'cr_id': cr_id}
 
     return ret_dict
 
@@ -418,8 +453,12 @@ if __name__ == '__main__':
         for line in list(reader):
             pdf_num = int(re.split('[ .]', line['pdf_name'])[1])
             page_num = int(line['page_num'])
+            cr_id = int(line['cr_id'])
 
-            params.append((pdf_num, page_num))
+            params.append((pdf_num, page_num, cr_id))
 
     pool = Pool(processes=13)
     results = pool.starmap(parse_tsv_data, params)
+
+    with open('./output/summary_tables.json', 'w') as fh:
+        json.dump(results, fh)
