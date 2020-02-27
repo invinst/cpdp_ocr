@@ -42,8 +42,13 @@ def extract_summaries(project_id, fp='./input/summary_tables.json'):
     summary_data = [s for s in summary_data if s]
 
     for pdf_page in summary_data:
+        pdf_num = str(pdf_page['pdf_num'])
+        zeroes = ''.join(['0' for i in range(7 - len(pdf_num))])
+
+        pdf_name = 'CPD {}{}.pdf'.format(zeroes, pdf_num)
         metadata = {
-                'page_num': pdf_page['pdf_num'],
+                'page_num': pdf_page['page_num'],
+                'pdf_name': pdf_name,
                 'cr_id': pdf_page['cr_id'],
             }
 
@@ -76,9 +81,6 @@ def extract_summaries(project_id, fp='./input/summary_tables.json'):
                             print(annotate_dict)
                             yield annotate_dict
 
-                            #page_data.append(annotate_dict)
-
-    #return for_annotating
 
 to_extract_map = [
           {'section_name': 'Accused Members', 'col_name': "Initial / Intake Allegation"},
