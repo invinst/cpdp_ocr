@@ -460,5 +460,7 @@ if __name__ == '__main__':
     pool = Pool(processes=13)
     results = pool.starmap(parse_tsv_data, params)
 
+    results = [r for r in results if r]
+
     with open('./output/summary_tables.json', 'w') as fh:
         json.dump(results, fh)

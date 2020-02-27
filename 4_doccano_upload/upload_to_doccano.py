@@ -1,13 +1,16 @@
 #!/usr/bin/python3
 
+import json
+import tempfile
+
 from os import listdir
 from doccano_api_client import DoccanoClient
 
 # instantiate a client and log in to a Doccano instance
 doccano_client = DoccanoClient(
-    'http://127.0.0.1'
+    'http://3.15.178.174',
     'admin',
-    'password',
+    'nope'
 )
 
 def project_by_name(project_name):
@@ -31,13 +34,92 @@ if project_dets['resourcetype'] != 'SequenceLabelingProject':
 unannotated_dir = '/home/matt/git/cpdp_parsers/3_parsers/output/'
 filenames = listdir(unannotated_dir)
 
+def extract_summaries(project_id, fp='./input/summary_tables.json'):
+    with open(fp, 'r') as fh:
+        summary_data = json.load(fh)
 
-for fn in filenames:
-    print(fn)
+    #oi wtf
+    summary_data = [s for s in summary_data if s]
+
+    for pdf_page in summary_data:
+        metadata = {
+                'page_num': pdf_page['pdf_num'],
+                'cr_id': pdf_page['cr_id'],
+            }
+
+        page_data = []
+        text = []
+
+        ignores = ['(None Entered)']
+
+        sections = pdf_page['sections']
+        for section in sections:
+            section_cols = section['columns']
+            for to_extract in to_extract_map:
+                section_to_extract = to_extract['section_name']
+                col_to_extract = to_extract['col_name']
+                if section['section_name'] == section_to_extract:
+                    print('section_name', section_to_extract)
+                    for col in section_cols:
+                        col_text = col['col_text']
+                        col_name = col['col_name']
+
+                        if col_text in ignores:
+                            continue
+
+                        if col_name == col_to_extract and col_text:
+                            print('col_name ', col_name)
+                            annotate_dict = {'meta': metadata, 'text': col_text}
+                            annotate_dict['meta']['Section'] = section_to_extract
+                            annotate_dict['meta']['Column'] = col_to_extract
+
+                            print(annotate_dict)
+                            yield annotate_dict
+
+                            #page_data.append(annotate_dict)
+
+    #return for_annotating
+
+to_extract_map = [
+          {'section_name': 'Accused Members', 'col_name': "Initial / Intake Allegation"},
+          {'section_name': 'Incident Finding / Overall Case Finding', 'col_name': 'Finding'},
+          {'section_name': 'Current Allegations', 'col_name': 'Allegation'},
+          {'section_name': 'Review Incident', 'col_name': 'Remarks'}
+        ]
+
+#    upload_resp = doccano_client.post_doc_upload(
+#            project_dets['id'],
+#            'json', 
+#            fn, 
+#            unannotated_dir)
+#
+
+
+
+project_id = project_dets['id']
+
+count = 0
+for for_upload in extract_summaries(project_id):
+    if count >= 10:
+        break
+
+    fh = open('/tmp/summaries.temp.json', 'w')
+    json.dump(for_upload, fh)
+    fh.close()
+
     upload_resp = doccano_client.post_doc_upload(
-            project_dets['id'],
+            project_id,
             'json', 
-            fn, 
-            unannotated_dir)
+            '/tmp/summaries.temp.json',
+            '/tmp')
 
-    print(upload_resp.text)
+    count += 1
+
+#
+
+#for fn in filenames:
+#    print(fn)
+#    
+#            
+
+#    print(upload_resp.text)
