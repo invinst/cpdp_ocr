@@ -3,16 +3,21 @@
 import re
 import csv
 import json
+import psycopg2
 
 from strsimpy.normalized_levenshtein import NormalizedLevenshtein
-
-
-
 from multiprocessing import Pool
+
+def pg_conn(db_name='cpdp', db_host='localhost', db_user='cpdp', db_pass='cpdp'):
+    vals = dict(db_name=db_name, db_host=db_host, db_user=db_user, db_pass=db_pass)
+    conn_str = "dbname={db_name} host={db_host} user={db_user} password={db_pass}".format(**vals)
+    conn = psycopg2.connect(conn_str)
+
+    return conn
 
 #only keys are used here. the column names are not used in the code yet. 
 col_based_headers = {
-        'Incident Details': ['abcd'],
+        'Incident Details': ['abcd'], #incident details is horizontally oriented AND columnar. breaks code for the moment, so this is a placeholder., 
         'Incident Finding / Overall Case Finding': ['Description of Incident', 'Finding', 'Entered By', 'Entered Date'],
         'Reporting Party Information': ['Role', 'Name', 'Star No.', 'Emp No.', 'UOA / UOD', 'Position', 'Sex', 'Race', 'Address', 'Phone'],
         'Incident Information': ['Incident From Date/Time', 'Address of Incident', 'Beat', 'Dist. Of Occurrence', 'Location Code', 'Location Description'],
@@ -20,6 +25,7 @@ col_based_headers = {
         'Other Involved Parties': ['Role', 'Name', 'Star No.', 'Emp No.', 'UOA / UOD', 'Position', 'Sex', 'Race', 'Address', 'Phone'],
         'Involved Party Associations': ['Role', 'Rep. Party Name', 'Related Person', 'Relationship'],
         'Incident Category List': ['Incident Category', 'Primary?', 'Initial?'],
+        'Initial Incident Category List': ['Initial Incident Category', 'Primary?', 'Initial?'],
         'Investigator History': ['Investigator', 'Type', 'Assigned Team', 'Assigned Date', 'Scheduled End Date', 'Investigation End Date', 'No. of Days'],
         'Extension History': ['Name', 'Previous Scheduled End Date', 'Extended Scheduled End Date', 'Date Certified Letter Sent', 'Reason Selected', 'Explination', 'Extension Report Date', 'Approved By', 'Approved Date', 'Approval Comments'],
         'Current Allegations': ['Accused Name', 'Seq. No.', 'Allegation', 'Category', 'Subcategory', 'Finding'],
@@ -28,7 +34,7 @@ col_based_headers = {
         'Attachments': ['No.', 'Type', 'Related Person', 'No. of Pages', 'Narrative', 'Original in File', 'Entered By', 'Entered Date/Time', 'Status', 'Approve Content', 'Approve Inclusion'],
         'Review Incident': ['Review Type', 'Accused/Involved Member Name', 'Result Type', 'Reviewed By', 'Position', 'Unit', 'Review Date', 'Remarks'],
         'Review Accused': ['Review Type', 'Accused/Involved Member Name', 'Result Type', 'Reviewed By', 'Position', 'Unit', 'Review Date', 'Remarks'],
-        'Accused Finding History': ['Accused', 'Allegation', 'Reviewed By', 'Reviewed Date/Time', 'CCR?', 'Concur?', 'Finding', 'Finding COmments'],
+        'Accused Finding History': ['Accused', 'Allegation', 'Reviewed By', 'Reviewed Date/Time', 'CCR?', 'Concur?', 'Finding', 'Finding Comments'],
         'Accused Penalty History': ['Accused', 'Reviewed By', 'Reviewed Date/Time', 'CCR?', 'Concur?', 'Penalty', 'Penalty Comments'],
         'Findings': ['Accused Name', 'Allegations', 'Category', 'Concur?', 'Findings', 'Comments']
         }
@@ -36,10 +42,9 @@ col_based_headers = {
 #these are not being used yet.
 row_based_headers  = ['Incident Details', [['CR Required?', 'Confidential?', 'Extraordinary Occurence', 'Police Shooting (U)?', 'Non Disciplinary Intervention:', 'Initial Assignment:', 'Notify IAD Immediately?', 'EEO Complaint No.:', 'Civil Suit No.:', 'Notify Chief Administator', 'Notify Coordinator?', 'Notification Other?', 'Notification Comments:'], ['Manner Incident Received?', 'Biased Language?', 'Bias Based Profiling?', 'Alcohol Related?', 'Pursuit Related?', 'Violence in Workplace?', 'Domestic Violence?', 'Civil Suit Settled Date:', 'Notify Chief?', 'Notification Does Not Apply?']]]
 
-#narrative_fields = [
-#        ['Incident Finding / Overall Case Finding', ['Description of Incident', 'Finding']],
-#        ['G
-#        ]
+def derive_luminance(rgb):
+    r, g, b = rgb
+    return (.2126*r) + (.587*g) + (.0722*b)
 
 def tokens_to_text(tokens, join_str=' '):
     return join_str.join([t['text'] for t in tokens]).strip()
@@ -109,12 +114,15 @@ def find_label(label_txt, tokens):
 def tokens_in_bounds(left, right, top, bottom, tokens):
     in_bounds = []
     for token in tokens:
+
         token_left = token['left']
         token_top = token['top']
         token_width = token['width']
         token_height = token['height']
         token_right = token['left'] + token_width
         token_bottom = token_top + token_height
+
+        within_bounds = True
 
         if token_left >= left and token_right <= right and token_top >= top and token_bottom <= bottom:
             in_bounds.append(token)
@@ -133,25 +141,12 @@ def lines_from_tokens(tokens):
         if token['text']:
             lines[line_key].append(token)
 
-    #already_used = []
-    #ret = []
-    #for token in tokens:
-    #    line_key = (token['line_num'], token['par_num'], token['block_num'])
-    #    if line_key in already_used:
-    #        continue
-    #    else:
-    #        already_used.append(line_key)
-#
-#        ret.append(lines[line_key])
-
-    #return ret
     return list(lines.values())
 
-def last_column_header_bounds(tokens, col_key, threshold=.4):
+def last_column_header_bounds(tokens, col_key, threshold=.4, label_name=None):
     """The powerhouse of the script. Need to cleanup and document"""
 
     if not col_key:
-        print('yo wtf this about')
         return
 
     levenshtein = NormalizedLevenshtein()
@@ -162,11 +157,14 @@ def last_column_header_bounds(tokens, col_key, threshold=.4):
 
     for line_num in range(0, len(lines)):
         line = lines[line_num]
-        if col_key == 'Status':
-            print('HMM', tokens_to_text(line))
         lowest_distance = 2 #distance will always be lower than this
         
+        token_prev_left = None
         for line_token in line[::-1]:
+            if token_prev_left:
+                if token_prev_left - (line_token['left'] + line_token['width']) > 15:
+                    break
+
             prev_potential_str = tokens_to_text(potential_tokens[-1])
             prev_key_dist = levenshtein.distance(prev_potential_str, col_key)
 
@@ -176,15 +174,12 @@ def last_column_header_bounds(tokens, col_key, threshold=.4):
 
             len_diff = abs(len(potential_str) - len(col_key)) / len(col_key) 
 
-            if key_dist < prev_key_dist:
-                #if  key_dist < threshold and len_diff < .15:
-                #    break
-
+            if key_dist <= prev_key_dist:
                 lowest_distance = key_dist
                 potential_tokens[-1].insert(0, line_token)
 
-            else:
-                break
+
+            token_prev_left = line_token['left']
 
         potential_tokens.append([])
 
@@ -207,16 +202,14 @@ def last_column_header_bounds(tokens, col_key, threshold=.4):
 
     potential_tokens = highest_toks
 
-    #if col_key in col_based_headers['Attachments']:
-    if col_key == 'Status':
-        print('highest tokens', set([tokens_to_text(h) for h in highest_toks ]))
-
     potential_tokens_combined = []
     for p1 in range(len(highest_toks)):
         tmp_combined = []
         for p2 in range(len(highest_toks)):
             if p2 <= p1:
                 continue
+
+            potential_tokens_combined.append(highest_toks[p1] + highest_toks[p2])
 
             tmp_combined += highest_toks[p1]
             tmp_combined += highest_toks[p2]
@@ -226,16 +219,16 @@ def last_column_header_bounds(tokens, col_key, threshold=.4):
     lowest_dist = 2
     for tokens in highest_toks + potential_tokens_combined:
         joined_str = tokens_to_text(tokens)
-
             
         key_dist = levenshtein.distance(joined_str, col_key)
 
         if key_dist < lowest_dist:
             #if col_key in col_based_headers['Attachments']:
-            if col_key == 'Status':
-                print('hmm', joined_str)
             lowest_dist = key_dist
             most_similar = tokens
+
+    if label_name == 'Attachments':
+        print('most_similar: ', tokens_to_text(most_similar))
 
     if most_similar: #and lowest_distance < threshold:
         left_point = min([t['left'] for t in most_similar])
@@ -250,8 +243,6 @@ def last_column_header_bounds(tokens, col_key, threshold=.4):
         right_point = 0
 
     col_str = ' '.join([t['text'] for t in most_similar])
-
-    print('col bounds: ', col_key, left_point, right_point, top_point, bottom_point)
 
     return left_point, right_point, top_point, bottom_point
 
@@ -324,14 +315,9 @@ def useful_tokens(tokens):
 
     return ret_tokens
 
-def pdf_name(pdf_num):
-    leading_zeroes = '0'.join(['' for i in range(0, 8-len(str(pdf_num)))])
-    name = 'CPD {}{}.pdf'.format(leading_zeroes, str(pdf_num))
-
-    return name
  
-def tsv_data(pdf_num, pdf_page, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
-    tsv_fp = '{}/{}/{}.{}.tsv'.format(ocrd_dir, pdf_name(pdf_num), pdf_name(pdf_num), pdf_page)
+def tsv_data(pdf_name, pdf_page, ocrd_dir='../1_ocr/output/'):
+    tsv_fp = '{}/{}/{}.{}.tsv'.format(ocrd_dir, pdf_name, pdf_name, pdf_page)
 
     with open(tsv_fp, 'r') as fh:
         fieldnames = ['level', 'page_num', 'block_num', 
@@ -345,8 +331,9 @@ def tsv_data(pdf_num, pdf_page, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
 
     return tokens, fieldnames
 
-def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_pdfs/ocrd'):
-    tokens, tsv_fieldnames = tsv_data(pdf_num, pdf_page, ocrd_dir=ocrd_dir)
+def parse_tsv_data(pdf_name, pdf_page=None, doc_type=None, ocrd_dir='../1_ocr/output/'):
+    tokens, tsv_fieldnames = tsv_data(pdf_name, pdf_page, ocrd_dir=ocrd_dir)
+
     if not tokens:
         return
 
@@ -362,10 +349,12 @@ def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_
     
     section_boundaries = []
     for label, label_bounds in label_boundaries:
+        if label == 'Attachments':
+            print(f'Label {label} bounds: {label_bounds}')
+
         section_top = label_bounds[2]
 
         if section_top not in section_tops:
-            print("yo wtf this shouldnt happen")
             continue
 
         top_idx = section_tops.index(section_top)
@@ -384,7 +373,8 @@ def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_
         min_left = 0
         min_right = page_width
 
-        section_tokens = tokens_in_bounds(0, page_width, label_bottom, bottom, tokens)
+
+        section_tokens = tokens_in_bounds(min_left, page_width, label_bottom, bottom, tokens)
         label_tokens[label] = section_tokens
 
         #iterate through each potential column header, going backwards
@@ -394,16 +384,23 @@ def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_
         section_columns = []
         prev_left = page_width
         prev_right = None
+        header_row_bottom = 0
+
         for col_name in col_based_headers[label][::-1]:
-            header_bounds = last_column_header_bounds(section_tokens, col_name)
+            header_bounds = last_column_header_bounds(section_tokens, col_name, label_name=label)
+
+            if label == 'Attachments':
+                print(col_name, header_bounds)
             if not header_bounds:
                 break
-            if col_name in col_based_headers['Attachments']:
-                print(col_name, header_bounds)
 
             header_left, header_right, header_top, header_bottom = header_bounds
+            if header_bottom > header_row_bottom:
+                header_row_bottom = header_bottom
+            else:
+                header_bottom = header_row_bottom
 
-            column_tokens = tokens_in_bounds(header_left, prev_left, header_bottom, bottom, section_tokens)
+            column_tokens = tokens_in_bounds(header_left-3, prev_left + 3, header_row_bottom+8, bottom, section_tokens)
             column_lines = lines_from_tokens(column_tokens)
 
             label_columns[col_name] = []
@@ -411,8 +408,8 @@ def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_
                 for tok in line:
                     label_columns[col_name].append(tok)
 
-            label_columns[col_name] = filter_toks(label_columns[col_name], min_y=header_top, max_y_dist=9999)
-            section_tokens = tokens_in_bounds(0, prev_left, label_bottom, bottom, tokens)
+            #label_columns[col_name] = filter_toks(label_columns[col_name], min_y=header_top, max_y_dist=9999)
+            section_tokens = tokens_in_bounds(0, header_left, label_bottom, bottom, tokens)
 
             ret_lines = lines_from_tokens(label_columns[col_name])
 
@@ -423,9 +420,11 @@ def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_
 
             ret_text = '\n'.join(line_strs)
 
-            if not ret_text or label == 'Incident Details':
+            if label == 'Incident Details':
                 continue
 
+            if not ret_text: ##TODO: DELETE ME##
+                continue
 
             column = {'col_name': col_name, 'col_text': ret_text}
             section_columns.append(column)
@@ -441,24 +440,26 @@ def parse_tsv_data(pdf_num, pdf_page=None, cr_id=None, ocrd_dir='/opt/data/cpdp_
     if not sections:
         return None
 
-    ret_dict = {'pdf_num': pdf_num, 'page_num':pdf_page, 'sections': sections, 'cr_id': cr_id}
+    ret_dict = {'pdf_name': pdf_name, 'page_num':pdf_page, 'sections': sections}
 
     return ret_dict
 
 if __name__ == '__main__':
+    conn = pg_conn()
+    curs = conn.cursor()
+
+    sqlstr = """
+        SELECT p.filename, pp.page_num, pp.page_classification 
+        FROM cr_pdfs p, cr_pdf_pages pp
+        WHERE p.id = pp.pdf_id"""
+
+    curs.execute(sqlstr)
+    pdfs = curs.fetchall()
+
     params = []
-    with open('input/tagged_pages.csv', 'r') as fh:
-        reader = csv.DictReader(fh)
 
-        for line in list(reader):
-            pdf_num = int(re.split('[ .]', line['pdf_name'])[1])
-            page_num = int(line['page_num'])
-            cr_id = int(line['cr_id'])
-
-            params.append((pdf_num, page_num, cr_id))
-
-    pool = Pool(processes=13)
-    results = pool.starmap(parse_tsv_data, params)
+    pool = Pool(processes=30)
+    results = pool.starmap(parse_tsv_data, pdfs, chunksize=8)
 
     results = [r for r in results if r]
 
