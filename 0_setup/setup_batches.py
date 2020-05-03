@@ -209,9 +209,9 @@ dbx_dirs =  [
           '/Green v. CPD FOIA Files/Green 1.31.20 Production',
           '/Green v. CPD FOIA Files/Green 2020.02.28 Production']
 
-DBX_AUTH_TOKEN = '6NwbW7MgBnAAAAAAAAAAlKBYGQ8Zo9oVtg1NQPY12AqbPiHyMfAQ1-yXPFLB9D_9'
-DOCUMENT_CLOUD_USERNAME = 'invisibleinstitute'
-DOCUMENT_CLOUD_PASSWORD = 'umbrella-barouche-pup'
+DBX_AUTH_TOKEN = ''
+DOCUMENT_CLOUD_USERNAME = ''
+DOCUMENT_CLOUD_PASSWORD = ''
 PROJECT_ID = 200010
 
 dh = dropbox_handler()
