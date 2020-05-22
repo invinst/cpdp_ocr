@@ -41,7 +41,9 @@ CREATE TABLE cr_pdf_pages (
 ) ;
 
 CREATE TABLE cr_ocr_tokens (
+	id SERIAL PRIMARY KEY,
 	pdf_id INTEGER REFERENCES cr_pdfs (id),
+        page_id INTEGER REFERENCES cr_pdf_pages (id),
 	page_num int,
 	lvl int,
 	block_num int,
@@ -57,6 +59,13 @@ CREATE TABLE cr_ocr_tokens (
 	background_color text,
 	text_color text,
 	background_color_name TEXT
+) ;
+
+CREATE TABLE cr_ocr_text (
+    id SERIAL PRIMARY KEY,
+    pdf_id INTEGER REFERENCES cr_pdfs (id),
+    page_id INTEGER REFERENCES cr_pdf_pages (id),
+    ocr_text TEXT
 ) ;
 
 

@@ -317,9 +317,9 @@ if __name__ == '__main__':
 
     results = pool.starmap(tag_pdf, pdfs, chunksize=8)
    
-    sqlstr = "INSERT INTO cr_pdf_pages (pdf_id, page_num, page_classification) values (%s, %s, %s)"
+    sqlstr = "UPDATE cr_pdf_pages set page_classification = %s WHERE pdf_id = %s and page_num = %s"
     for pdf_results in results:
         for _, pdf_id, page_num, classification in pdf_results:
-            curs.execute(sqlstr, (pdf_id, page_num, classification))
+            curs.execute(sqlstr, (classification, pdf_id, page_num))
 
         conn.commit()

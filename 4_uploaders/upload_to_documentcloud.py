@@ -24,7 +24,7 @@ creds_fp = '{}/.invisible_inst_muckrock'.format(os.environ['HOME'])
 with open(creds_fp, 'r') as fh:
     creds_data = {}
     for line in fh.readlines():
-        key, val = line.strip().split()
+        key, val = line.strip().split(':')
         creds_data[key] = val
 
     DBX_AUTH_TOKEN = creds_data['DBX_AUTH_TOKEN']
@@ -195,7 +195,7 @@ class DocumentCloud:
 def do_delete(doc_id):
     dc.delete(f"{API_URL}documents/{doc_id}")
 
-def pending_uploads(dirs):
+def pending_uploads_beta(dirs):
     print("Grabbing existing documentcloud files")
     doccloud_files = [r['title'].lower() for r in dc.list_documents()]
     print("Existing documentcloud file #: ", len(doccloud_files))
@@ -238,7 +238,8 @@ def dbx_to_doccloud(dbx_dir, fp, beta=False):
 
         else:
             print(fp, dh_fp)
-    #dc.upload_file(fp, dh_fp, source=dbx_dir, project_id=PROJECT_ID)
+    else:
+        dc.upload_file(fp, dh_fp, source=dbx_dir, project_id=PROJECT_ID)
 
 def delete_duplicates():
     documents = dc.list_documents()
@@ -252,7 +253,7 @@ def delete_duplicates():
 
 conn = pg_conn()
 curs = conn.cursor()
-def update_pdf_table(doc):
+def update_pdf_table_beta(doc):
     doc_id = doc['id']
     doc_slug = doc['slug']
 
@@ -277,24 +278,78 @@ dh = dropbox_handler()
 print("Connected to dropbox")
 #dc = DocumentCloud(DOCUMENT_CLOUD_USERNAME, DOCUMENT_CLOUD_PASSWORD)
 
-pending = []
-for dbx_dir in dirs:
-    print(f"Checking # of pending files for {dbx_dir}")
-    dir_files = dh.list_files(dbx_dir)
-
-    pending_before = len(pending)
-    for dir_file in dir_files:
-        pending.append((dbx_dir, dir_file))
-
 from documentcloud import DocumentCloud
 dc = DocumentCloud(DOCUMENT_CLOUD_USERNAME, DOCUMENT_CLOUD_PASSWORD)
 
 print("Connected to documentcloud")
 
+
+sqlstr = """
+select 
+  split_part(fb.dropbox_path, '/', 4), 
+  p.filename,
+  p.cr_id
+FROM 
+  cr_foia_batch fb,
+  cr_pdfs p
+where fb.id = p.batch_id"""
+
+curs.execute(sqlstr)
+
+def do_upload(batch, filename, crid, project_id=49649):
+    pdf = f'/home/matt/git/cpdp_parsers/0_setup/output/{filename}'
+    data = dict(batch=batch, filename=filename)
+    params = dict(pdf=pdf, title=f'CRID {crid}', project=str(project_id), data=data)
+    doc = dc.documents.upload(**params)
+
+    return doc
+
+def insert_doc_data(doc):
+    filename = doc.data['filename']
+    url = doc.canonical_url
+
+    print(filename)
+
+    sqlstr = """
+      UPDATE cr_pdfs SET doccloud_url = %s
+      WHERE filename = %s
+    """
+    conn = pg_conn()
+    curs = conn.cursor()
+
+    curs.execute(sqlstr, (url, filename))
+    conn.commit()
+    conn.close()
+
+    return
+
+pool = Pool(processes=12)
+project_docs = dc.documents.search('project:"Complaint Registers"')
+
+doc_data = pool.map(insert_doc_data, project_docs)
+
+#conn.commit()
+
+
+#existing_docs = dict([(d.data['filename'], d.data) for d in docs])
+#upload_params = curs.fetchall()
+
+#pool = Pool(processes=8)
+#docs = pool.starmap(do_upload, upload_params)
+
+#pending = []
+#for dbx_dir in dirs:
+#    print(f"Checking # of pending files for {dbx_dir}")
+#    dir_files = dh.list_files(dbx_dir)
+#
+#    pending_before = len(pending)
+#    for dir_file in dir_files:
+#        pending.append((dbx_dir, dir_file))
+#
 #pending = pending_uploads(dirs)
 
 #print("Pending # of files to upload: ", len(pending))
-for_upload = [dbx_to_doccloud(*p) for p in pending]
+#for_upload = [dbx_to_doccloud(*p) for p in pending]
 
 #pool = Pool(processes=32)
 #pool.starmap(dbx_to_doccloud, pending)
