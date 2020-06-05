@@ -1,0 +1,17 @@
+requests==2.23.0
+dropbox==10.1.2
+PyPDF2==1.26.0
+pytesseract==0.3.4
+opencv-contrib-python-headless==4.2.0.34
+imutils==0.5.3
+numpy==1.18.4
+scikit-learn==0.23.1
+Pillow==6.2.2
+colormath==3.0.0
+smart-open==2.0.0
+pdf2image==1.13.1
+scikit-image==0.17.2
+strsimpy==0.1.4
+civis==1.14.1
+gensim==3.8.3
+joblib==0.14.1
