@@ -12,7 +12,6 @@ import numpy as np
 
 from sklearn.cluster import KMeans 
 from multiprocessing import Pool
-from PIL import Image
 from sys import argv
 
 from colormath.color_objects import sRGBColor, LabColor
@@ -22,6 +21,7 @@ from colormath.color_diff import delta_e_cmc
 from smart_open import open
 
 from pdf2image import convert_from_path
+from PIL import Image
 
 out_dir = './output'
 
@@ -46,7 +46,7 @@ def ocr_page(page_image=None, fp=None):
     unstructured_text = pytesseract.image_to_string(page_image)
     structured_text = pytesseract.image_to_data(page_image)
 
-    return unstructured_text, structured_text
+    return structured_text, unstructured_text
 
 def derive_luminance(rgb):
     r, g, b = rgb
@@ -148,7 +148,7 @@ def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
 
     redaction_contours = []
     for contour in contours:
-        if cv2.contourArea(contour) < 150:
+        if cv2.contourArea(contour) < 300:
             continue
 
         peri = cv2.arcLength(contour, False)
@@ -157,7 +157,7 @@ def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
         if len(approx) != 4:
             continue
 
-        if cv2.contourArea(approx) < 150:
+        if cv2.contourArea(approx) < 350:
             continue
 
         contour_x, contour_y, contour_w, contour_h = cv2.boundingRect(approx)
@@ -176,7 +176,6 @@ def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
 
 def ocr_file(filename, pages=[], brightness=30, contrast=30, no_redactions=True):
     pdf_path = f'./input/{filename}'
-    curs = conn.cursor()
 
     file_basename = os.path.basename(pdf_path)
     pdf_outdir = '{}/{}'.format(out_dir, file_basename)
@@ -189,7 +188,6 @@ def ocr_file(filename, pages=[], brightness=30, contrast=30, no_redactions=True)
     page_num = 1
     pdf_name = os.path.basename(pdf_path)
     for page_image in page_images:
-        print(pdf_name)
         page_image = np.array(page_image)
         if brightness or contrast:
             clean_page_image = mod_brightcontrast(page_image, brightness, contrast)
@@ -224,12 +222,9 @@ def ocr_file(filename, pages=[], brightness=30, contrast=30, no_redactions=True)
 
         page_num += 1
 
-    conn.commit()
-
 def output_dir_finished(filename, page_count):
     output_dir = f'./output/{filename}'
     if not os.path.exists(output_dir):
-        #print(f'checking: {output_dir},  {page_count}')
         return False
 
     file_types = ['tsv', 'txt', 'png']
@@ -267,7 +262,7 @@ def insert_ocr_file(input_file):
     curs = conn.cursor()
 
     filename, page_count = input_file
-    print(filename)
+    print('Inserting..', filename)
     for page_num in range(1, page_count+1):
         page_fp = f'./output/{filename}/{filename}.{page_num}.txt'
         with open(page_fp, 'r') as fh:
@@ -275,6 +270,7 @@ def insert_ocr_file(input_file):
 
         sqlstr = """INSERT INTO cr_pdf_pages (pdf_id, page_num)
         SELECT p.id, %s FROM cr_pdfs p where p.filename = %s
+        ON CONFLICT DO NOTHING
         RETURNING cr_pdf_pages.id"""
         curs.execute(sqlstr, (page_num, filename))
         page_id = curs.fetchone()[0]
@@ -286,9 +282,14 @@ def insert_ocr_file(input_file):
         WHERE p.filename = %s
         AND pp.page_num = %s
         AND pp.pdf_id = p.id
+        ON CONFLICT DO NOTHING
         RETURNING cr_ocr_text.id"""
 
         curs.execute(sqlstr, (ocr_text, filename, int(page_num)))
+        resp = curs.fetchall()
+
+        if len(resp) == 0:
+            continue #skip if ocr text already there -- quick fix.
 
         sqlstr = """
            INSERT INTO cr_ocr_tokens 
@@ -320,42 +321,8 @@ input_files = get_input_files()
 pending_files = get_pending_pdfs(input_files)
 print("Pending files: ", len(pending_files))
 
-pool = Pool(processes=70)
-pool.imap_unordered(ocr_file, pending_files, chunksize=1)
+pool = Pool(processes=31)
+pool.map(ocr_file, pending_files, chunksize=1)
 
 print(type(input_files))
 insert_ocr_files(input_files)   
-
-#ocr_file(pending_file)
-
-#for input_file in input_files:
-#   sql_data = ocr_sql_data(structured_text, page_image, pdf_name)
-
-#   print(f'sql_data: {sql_data}')
-#   sqlstr = """
-#       INSERT INTO cr_ocr_tokens 
-#        (pdf_id, lvl, page_num, block_num, par_num, line_num, word_num, 
-#         left_bound, top_bound, width_bound, height_bound, conf,
-#         text, background_color, text_color, background_color_name) 
-#       
-#         SELECT p.id, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s FROM cr_pdfs p
-#       WHERE p.filename = %s
-#            """ 
-   #for line in sql_data:
-            #print('Creating sql data....')
-            #vals = (line['level'],  page_num,  line['block_num'],  line['par_num'],  line['line_num'], 
-                #line['word_num'],  line['left'],  line['top'],  line['width'], 
-                #line['height'],  line['conf'],  line['text'],  pdf_name)
-        ##        str(line['background_color']),  str(line['text_color']),  line['background_color_name'])
-#
-            #mog = curs.mogrify(sqlstr, vals).decode('utf8')
-            #print(mog)
-            #curs.execute(mog)
-#
-            #conn.commit()
-#
-        #if not structured_text:
-            #print('[ERROR]', pdf_path, 'could not be tesseracted correctly')
-            #continue
-#
-    #ocr_file(pdfs[0])

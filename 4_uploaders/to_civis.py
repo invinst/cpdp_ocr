@@ -14,12 +14,12 @@ def pg_conn(db_name='cpdp', db_host='localhost', db_user='cpdp', db_pass='cpdp')
 conn = pg_conn()
 cursor = conn.cursor()
 
-api_key = ''
+api_key = 'f85dc4629c71072325161d0bb275f31bf7e5f0c934628b218b5240e052add7be'
 client = civis.APIClient(api_key=api_key)
 db_id = [d['id'] for d in client.databases.list() if d['name'] == 'Invisible Institute'][0]
 
 
-tables = ['cr_complaint_registers', 'cr_foia_batch', 'cr_ocr_tokens', 'cr_pdf_pages', 'cr_pdfs', 'cr_redaction_blocks', 'cr_summary_data']
+tables = ['cr_foia_batch', 'cr_batch_data', 'cr_ocr_text', 'cr_ocr_tokens', 'cr_pdf_pages', 'cr_pdfs', 'cr_summary_data']
 
 for table_name in tables:
     df = pd.read_sql("SELECT * FROM {}".format(table_name), conn)

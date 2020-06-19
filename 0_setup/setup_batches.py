@@ -63,15 +63,16 @@ def insert_pdf_data(batch_id, pdf_name, pdf_fp):
     curs.execute(sqlstr)
     resp = curs.fetchone()
     if resp: #pdf id already exists
-        print("PDF already inserted. Inserting old pdf..")
-        #return resp[0]
+        return resp[0]
 
     import PyPDF2
     pdf_h = PyPDF2.PdfFileReader(open(pdf_fp, 'rb'))
 
     sqlstr = """
       INSERT INTO cr_pdfs (batch_id, filename, page_count)
-      VALUES (%s, %s, %s) returning id
+      VALUES (%s, %s, %s)
+      ON CONFLICT DO NOTHING
+      RETURNING id
     """
 
     curs.execute(sqlstr, (batch_id, pdf_name, pdf_h.getNumPages()))
@@ -88,7 +89,12 @@ def get_batch_id(dbx_dir):
         print("Batch already exists. Using old batch id..")
         batch_id = resp[0]
     else:
-        sqlstr = f"INSERT INTO cr_foia_batch (dropbox_path) VALUES ('{dbx_dir}') returning id"
+        sqlstr = f"""
+          INSERT INTO cr_foia_batch (dropbox_path) 
+          VALUES ('{dbx_dir}') 
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        """
         curs.execute(sqlstr, (dbx_dir))
 
         resp = curs.fetchone()
@@ -108,13 +114,15 @@ def prepare_batches(fp='../batches.txt'):
         dir_files = dbx_h.list_files(dbx_dir)
         dir_files = [d for d in dir_files if d.endswith('pdf')]
 
+        print(len(dir_files))
+
         for pdf_name in dir_files:
             pdf_fp = dbx_h.download_file(dbx_path=dbx_dir, filename=pdf_name)
             insert_pdf_data(batch_id, pdf_name, pdf_fp)
 
         conn.commit()
 
-conn = pg_conn() #global
-curs = conn.cursor() #global
+conn = pg_conn()
+curs = conn.cursor()
                   
 prepare_batches()

@@ -84,7 +84,7 @@ class dropbox_handler:
 
         return local_path
 
-class DocumentCloud:
+class DocumentCloudBeta:
     def __init__(self, username, password):
         self.username = username
         self.password = password
@@ -265,50 +265,28 @@ def update_pdf_table_beta(doc):
     curs.execute(sqlstr, (document_url, doc['title']))
     conn.commit()
 
-
-dirs =  [
-  '/Green v. CPD FOIA Files/Raw documents from Green v CPD/Green 2019.12.30 Production',
-  '/Green v. CPD FOIA Files/Raw documents from Green v CPD/Green 2019.12.02 Production',
-  '/Green v. CPD FOIA Files/Raw documents from Green v CPD/Green 1.31.20 Production',
-  '/Green v. CPD FOIA Files/Raw documents from Green v CPD/Green 2020.02.28 Production',
-  '/Green v. CPD FOIA Files/Raw documents from Green v CPD/Green, C. 2019.09.03 Production',
-  '/Green v. CPD FOIA Files/Raw documents from Green v CPD/Green 12.30.19 Production/Green 2019.12.30 Production']
-
 dh = dropbox_handler()
 print("Connected to dropbox")
 #dc = DocumentCloud(DOCUMENT_CLOUD_USERNAME, DOCUMENT_CLOUD_PASSWORD)
 
-from documentcloud import DocumentCloud
-dc = DocumentCloud(DOCUMENT_CLOUD_USERNAME, DOCUMENT_CLOUD_PASSWORD)
-
-print("Connected to documentcloud")
-
-
-sqlstr = """
-select 
-  split_part(fb.dropbox_path, '/', 4), 
-  p.filename,
-  p.cr_id
-FROM 
-  cr_foia_batch fb,
-  cr_pdfs p
-where fb.id = p.batch_id"""
-
-curs.execute(sqlstr)
 
 def do_upload(batch, filename, crid, project_id=49649):
     pdf = f'/home/matt/git/cpdp_parsers/0_setup/output/{filename}'
     data = dict(batch=batch, filename=filename)
-    params = dict(pdf=pdf, title=f'CRID {crid}', project=str(project_id), data=data)
+    params = dict(
+            pdf=pdf,
+            title=f'CRID {crid}',
+            project=str(project_id),
+            data=data,
+            access='public')
     doc = dc.documents.upload(**params)
 
     return doc
 
 def insert_doc_data(doc):
-    filename = doc.data['filename']
+    filename = doc.data['filename'].replace('.html', '.pdf')
     url = doc.canonical_url
 
-    print(filename)
 
     sqlstr = """
       UPDATE cr_pdfs SET doccloud_url = %s
@@ -323,33 +301,35 @@ def insert_doc_data(doc):
 
     return
 
+def get_data(doc):
+    return (doc.title, doc.data)
+
+from documentcloud import DocumentCloud
+dc = DocumentCloud(DOCUMENT_CLOUD_USERNAME, DOCUMENT_CLOUD_PASSWORD)
+
+print("Connected to documentcloud")
+
 pool = Pool(processes=12)
-project_docs = dc.documents.search('project:"Complaint Registers"')
+project_docs = dc.documents.search('project:"Complaint Registers"', data=True)
 
-doc_data = pool.map(insert_doc_data, project_docs)
+existing_dc_docs = dict(pool.map(get_data, project_docs))
 
-#conn.commit()
+pool = Pool(processes=14)
+docs = pool.map(insert_doc_data, project_docs)
+
+sqlstr = """
+select 
+  split_part(fb.dropbox_path, '/', 4), 
+  p.filename,
+  p.cr_id
+FROM 
+  cr_foia_batch fb,
+  cr_pdfs p
+where fb.id = p.batch_id
+AND doccloud_url IS NULL"""
 
 
-#existing_docs = dict([(d.data['filename'], d.data) for d in docs])
-#upload_params = curs.fetchall()
-
-#pool = Pool(processes=8)
-#docs = pool.starmap(do_upload, upload_params)
-
-#pending = []
-#for dbx_dir in dirs:
-#    print(f"Checking # of pending files for {dbx_dir}")
-#    dir_files = dh.list_files(dbx_dir)
-#
-#    pending_before = len(pending)
-#    for dir_file in dir_files:
-#        pending.append((dbx_dir, dir_file))
-#
-#pending = pending_uploads(dirs)
-
-#print("Pending # of files to upload: ", len(pending))
-#for_upload = [dbx_to_doccloud(*p) for p in pending]
-
-#pool = Pool(processes=32)
-#pool.starmap(dbx_to_doccloud, pending)
+curs.execute(sqlstr)
+pending_upload_params = curs.fetchall()
+pending_insert = pool.starmap(do_upload, pending_upload_params)
+pool.map(insert_doc_data, pending_insert)
