@@ -21,9 +21,9 @@ This step primes the database for pipeline, downloads files from Dropbox into 0_
 3. (setup_batches.py) Downloads batches of pdfs from dropbox into 0_setup/output. Batch paths come from batches.txt. Inserts row per batch into cr_batches. Inserts row per PDF into cr_pdfs with cr_batches id, pdf filename and page_count.
 
 Notes: 
--setup_batches.py can be run more once and will continue wherever it's left off.
--PDFs are not split into pages at this step.
--Because there are no filename colisions in CPD's batches, all files are put into the same directory.
+- setup_batches.py can be run more once and will continue wherever it's left off.
+- PDFs are not split into pages at this step.
+- Because there are no filename colisions in CPD's batches, all files are put into the same directory.
 
 ### 1. OCR
 
