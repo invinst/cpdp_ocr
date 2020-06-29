@@ -83,3 +83,12 @@ CREATE TABLE cr_redaction_blocks (
     page_num INTEGER,
     coords TEXT
 ) ;
+
+CREATE MATERIALIZED VIEW cr_narratives as (SELECT  p.cr_id, p.filename AS pdf_name, p.id as pdf_id, pp.id as page_id, sd.id summary_data_id, pp.page_num, sd.section_name, sd.column_name, sd.text, p.doccloud_url
+  FROM cr_summary_data sd, cr_pdfs p, cr_pdf_pages pp
+  WHERE sd.page_id = pp.id AND p.id = pp.pdf_id AND sd.text IS NOT NULL
+  AND ((section_name = 'Accused Members' AND column_name = 'Initial / Intake Allegation')
+    OR (section_name = 'Review Incident' AND 'col_name' = 'Remarks')
+    OR (section_name = 'Incident Finding / Overall Case Finding' and column_name = 'Finding')
+    OR (section_name = 'Current Allegations' and column_name = 'Allegation'))) ;
+

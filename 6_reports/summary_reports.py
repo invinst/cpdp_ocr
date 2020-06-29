@@ -45,6 +45,8 @@ query = f"""
 cursor.execute(query)
 results = list(cursor.fetchall())
 
+print("Number of narratives: ", len(results))
+
 with open('./output/narratives.csv', 'w') as fh:
     w = csv.writer(fh)
     w.writerow(('cr_id', 'pdf_name', 'page_num', 'section_name', 

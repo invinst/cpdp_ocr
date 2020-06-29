@@ -81,7 +81,7 @@ def insert_pdf_data(batch_id, pdf_name, pdf_fp):
     return pdf_id
 
 def get_batch_id(dbx_dir):
-    sqlstr = f"SELECT id FROM cr_foia_batch WHERE dropbox_path = '{dbx_dir}'"
+    sqlstr = f"SELECT id FROM cr_batch WHERE dropbox_path = '{dbx_dir}'"
 
     curs.execute(sqlstr)
     resp = curs.fetchone()
@@ -90,7 +90,7 @@ def get_batch_id(dbx_dir):
         batch_id = resp[0]
     else:
         sqlstr = f"""
-          INSERT INTO cr_foia_batch (dropbox_path) 
+          INSERT INTO cr_batch (dropbox_path) 
           VALUES ('{dbx_dir}') 
           ON CONFLICT DO NOTHING
           RETURNING id

@@ -11,7 +11,7 @@ import re
 import numpy as np
 
 from sklearn.cluster import KMeans 
-from multiprocessing import Pool
+import multiprocessing as mp
 from sys import argv
 
 from colormath.color_objects import sRGBColor, LabColor
@@ -22,6 +22,8 @@ from smart_open import open
 
 from pdf2image import convert_from_path
 from PIL import Image
+
+import logging
 
 out_dir = './output'
 
@@ -45,6 +47,8 @@ def ocr_page(page_image=None, fp=None):
     print("Converting Image to data")
     unstructured_text = pytesseract.image_to_string(page_image)
     structured_text = pytesseract.image_to_data(page_image)
+
+    print(structured_text)
 
     return structured_text, unstructured_text
 
@@ -98,7 +102,7 @@ def token_colors(token, img):
 
     return bg_color, text_color, bg_canon
 
-def ocr_sql_data(fp):
+def tsv_sql_data(fp):
     """turns tsv data into sql-ready data. 
        also extracts colors of text and bg"""
 
@@ -116,16 +120,18 @@ def ocr_sql_data(fp):
     header = tsv_lines[0]
     tsv_tokens = [normalize_row(dict(zip(header, l))) for l in  tsv_lines[1:]]
 
-#    ret_tokens = []
+    ret_tokens = []
 
-    #for token in tsv_tokens:
-    #    bg_color, text_color, bg_canon = token_colors(token, img)
-    #    token['background_color'] = list(bg_color)
-    #    token['text_color'] = list(text_color)
-    #    token['background_color_name'] = bg_canon
+    for token in tsv_tokens:
+        bg_color, text_color, bg_canon = token_colors(token, img)
+        token['background_color'] = list(bg_color)
+        token['text_color'] = list(text_color)
+        token['background_color_name'] = bg_canon
 
-#        ret_tokens.append(token)
+        ret_tokens.append(token)
+
     ret_tokens = tsv_tokens
+    print(ret_tokens)
 
     return ret_tokens
 
@@ -184,7 +190,7 @@ def ocr_file(filename, pages=[], brightness=30, contrast=30, no_redactions=True)
 
     print("OCRing", pdf_path)
 
-    page_images = convert_from_path(pdf_path)
+    page_images = convert_from_path(pdf_path)[:1]
     page_num = 1
     pdf_name = os.path.basename(pdf_path)
     for page_image in page_images:
@@ -221,6 +227,8 @@ def ocr_file(filename, pages=[], brightness=30, contrast=30, no_redactions=True)
         cv2.imwrite(out_fp, page_image)
 
         page_num += 1
+#    insert_ocr_file(filename, len(page_images))
+    print('uh?')
 
 def output_dir_finished(filename, page_count):
     output_dir = f'./output/{filename}'
@@ -257,11 +265,10 @@ def get_pending_pdfs(input_files):
     return pending_files
 
 
-def insert_ocr_file(input_file):
+def insert_ocr_file(filename, page_count):
     conn = pg_conn()
     curs = conn.cursor()
 
-    filename, page_count = input_file
     print('Inserting..', filename)
     for page_num in range(1, page_count+1):
         page_fp = f'./output/{filename}/{filename}.{page_num}.txt'
@@ -288,41 +295,49 @@ def insert_ocr_file(input_file):
         curs.execute(sqlstr, (ocr_text, filename, int(page_num)))
         resp = curs.fetchall()
 
-        if len(resp) == 0:
-            continue #skip if ocr text already there -- quick fix.
+        print('udfasdfa')
+
+        #if len(resp) == 0:
+        #    continue #skip if ocr text already there -- quick fix.
 
         sqlstr = """
            INSERT INTO cr_ocr_tokens 
             (pdf_id, page_id, lvl, page_num, block_num, par_num, line_num, word_num, 
-             left_bound, top_bound, width_bound, height_bound, conf, text) 
-             SELECT p.id, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s FROM cr_pdfs p
+             left_bound, top_bound, width_bound, height_bound, conf, text, background_color, text_color, background_color_name) 
+             SELECT p.id, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s FROM cr_pdfs p
            WHERE p.filename = %s
            """
+        print('udfasdfa')
 
         page_fp = f'./output/{filename}/{filename}.{page_num}.tsv'
         with open(page_fp, 'r') as fh:
             for line in csv.DictReader(fh, delimiter='\t'):
                 vals = (page_id, line['level'], page_num,  line['block_num'],  line['par_num'],  line['line_num'], 
                 line['word_num'],  line['left'],  line['top'],  line['width'], 
-                line['height'],  line['conf'],  line['text'],  filename)
+                line['height'],  line['conf'],  line['text'],  line['background_color'], line['text_color'], line['background_color_name'], filename)
 
                 mog = curs.mogrify(sqlstr, vals).decode('utf8')
+                print(mog)
                 curs.execute(mog)
+
+    print('got here?')
     conn.commit()
     conn.close()
 
 def insert_ocr_files(input_files):
-    pool = Pool(processes=32)
+    pool = mp.Pool(processes=32)
     pool.map(insert_ocr_file, input_files, chunksize=8)
 
     conn.commit()
+
+logger = mp.log_to_stderr
  
 input_files = get_input_files()
-pending_files = get_pending_pdfs(input_files)
+pending_files = get_pending_pdfs(input_files)[:10]
 print("Pending files: ", len(pending_files))
 
-pool = Pool(processes=31)
-pool.map(ocr_file, pending_files, chunksize=1)
+#pool = mp.Pool(processes=16)
+#pool.map(ocr_file, pending_files, chunksize=1)
 
 print(type(input_files))
-insert_ocr_files(input_files)   
+#insert_ocr_files(input_files)   
