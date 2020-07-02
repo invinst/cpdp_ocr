@@ -16,6 +16,21 @@ def pg_conn(db_name='cpdp', db_host='localhost', db_user='cpdp', db_pass='cpdp')
 conn = pg_conn()
 cursor = conn.cursor()
 
+cursor.execute("""
+CREATE OR REPLACE FUNCTION _final_median(NUMERIC[])
+   RETURNS NUMERIC AS
+$$
+   SELECT AVG(val)
+   FROM (
+     SELECT val
+     FROM unnest($1) val
+     ORDER BY 1
+     LIMIT  2 - MOD(array_upper($1, 1), 2)
+     OFFSET CEIL(array_upper($1, 1) / 2.0) - 1
+   ) sub;
+$$
+LANGUAGE 'sql' IMMUTABLE;""")
+
 query = f"""
 SELECT 
   (round(similarity(sq1.text, sq2.text)::float * 100) / 100)::float sim_bracket
@@ -33,7 +48,6 @@ results = list(cursor.fetchall())
 print("Narratives summary:")
 print(pd.read_sql("select count(*), avg(length(text)), median(length(text)) from cr_narratives", conn))
 print(pd.read_sql("select count(*), column_name, section_name from cr_narratives group by column_name, section_name", conn))
-
 
 pprint("Brackets of similarities")
 print(['count', 'avg_len', 'med_len', 'similarity_brack']) 

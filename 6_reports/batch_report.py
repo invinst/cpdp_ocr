@@ -21,7 +21,7 @@ def run_sql(sqlstr):
 
 pdfs_per_batch = run_sql("""
 select count(*), dropbox_path 
-  from cr_foia_batch fb, cr_pdfs p 
+  from cr_batch fb, cr_pdfs p 
   where p.batch_id = fb.id
   group by dropbox_path, fb.id 
   UNION SELECT count(*), 'all'
@@ -32,7 +32,7 @@ crid_pdfs_per_batch = run_sql("""
   SELECT dropbox_path, MEDIAN(count), MIN(count), MAX(count), AVG(count), SUM(count) 
   FROM (
     SELECT dropbox_path, COUNT(cr_id) 
-    FROM cr_pdfs p, cr_foia_batch fb 
+    FROM cr_pdfs p, cr_batch fb 
     WHERE fb.id = p.batch_id 
     GROUP BY cr_id, dropbox_path) sq 
   GROUP BY dropbox_path
@@ -46,7 +46,7 @@ pages_per_batch = run_sql("""
   SELECT
     dropbox_path, MEDIAN(page_count), MIN(page_count), 
     MAX(page_count), AVG(page_count), SUM(page_count) 
-  FROM cr_pdfs p, cr_foia_batch fb 
+  FROM cr_pdfs p, cr_batch fb 
   WHERE fb.id = p.batch_id 
   GROUP BY dropbox_path
   UNION
@@ -70,7 +70,7 @@ pdf_count_of_count_batches = run_sql("""
     select count(cr_id), batch_id 
     from cr_pdfs 
     group by cr_id, batch_id) sq,
-    cr_foia_batch fb 
+    cr_batch fb 
   WHERE sq.batch_id = fb.id
   GROUP BY sq.count, fb.dropbox_path 
   ORDER BY dropbox_path, count_of_count desc, sq.count asc
