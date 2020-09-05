@@ -316,7 +316,7 @@ def useful_tokens(tokens):
     return ret_tokens
 
  
-def tsv_data(pdf_name, pdf_page, ocrd_dir='../1_ocr/output/'):
+def tsv_data(pdf_name, pdf_page, ocrd_dir='../1_ocr/output/ocr/'):
     tsv_fp = '{}/{}/{}.{}.tsv'.format(ocrd_dir, pdf_name, pdf_name, pdf_page)
 
     with open(tsv_fp, 'r') as fh:
@@ -331,7 +331,7 @@ def tsv_data(pdf_name, pdf_page, ocrd_dir='../1_ocr/output/'):
 
     return tokens, fieldnames
 
-def parse_tsv_data(pdf_name, pdf_page=None, doc_type=None, ocrd_dir='../1_ocr/output/'):
+def parse_tsv_data(pdf_name, pdf_page=None, doc_type=None, ocrd_dir='../1_ocr/output/ocr/'):
     tokens, tsv_fieldnames = tsv_data(pdf_name, pdf_page, ocrd_dir=ocrd_dir)
 
     if not tokens:

@@ -19,7 +19,7 @@ def get_image(path, norm_size=True, norm_exposure=False):
 
 def pg_conn(db_name='cpdp', db_host='localhost', db_user='cpdp', db_pass='cpdp'):
     vals = dict(db_name=db_name, db_host=db_host, db_user=db_user, db_pass=db_pass)
-    conn_str = "dbname={db_name} host={db_host} user={db_user} password={db_pass} port=5433".format(**vals)
+    conn_str = "dbname={db_name} host={db_host} user={db_user} password={db_pass}".format(**vals)
     conn = psycopg2.connect(conn_str)
 
     return conn
@@ -44,7 +44,7 @@ def identify_pdf_cpd_ids(pdf_name, begin, end):
     assert type(begin) == int and type(end) == int
     
     pages_cpd_ids = []
-    pdf_dir = '{}/{}'.format('./input', pdf_name)
+    pdf_dir = '{}/{}'.format('./input/ocr', pdf_name)
     pdf_files = sorted(os.listdir(pdf_dir))
 
     txt_files = [i for i in pdf_files if i.endswith('.txt')]
@@ -71,7 +71,7 @@ def identify_pdf_cpd_ids(pdf_name, begin, end):
 
 def identify_doc_type(pdf_name, page_num=1, filename=None):
     doc_type = None
-    filepath = '{}/{}'.format('./input', pdf_name)
+    filepath = '{}/{}'.format('./input/ocr', pdf_name)
 
     startswith_map = (
         ('FACE SHEET (Notification','Face Sheet'),
@@ -273,7 +273,7 @@ def identify_doc_type(pdf_name, page_num=1, filename=None):
     return None
 
 def tag_pdf(pdf_id, pdf_name):
-    ocrd_path = '{}/{}'.format('./input', pdf_name)
+    ocrd_path = '{}/{}'.format('./input/ocr', pdf_name)
     try:
         fps = os.listdir(ocrd_path)
     except:

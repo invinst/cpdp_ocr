@@ -9,7 +9,7 @@ from zipfile import ZipFile
 import os
 import re
 
-from PyPDF2 import PdfFileReader
+import PyPDF2
 
 def pg_conn(db_name='cpdp', db_host='localhost', db_user='cpdp', db_pass='cpdp'):
     vals = dict(db_name=db_name, db_host=db_host, db_user=db_user, db_pass=db_pass)
@@ -59,14 +59,18 @@ class dropbox_handler:
         return out_fp
 
 def insert_pdf_data(batch_id, pdf_name, pdf_fp):
-    sqlstr = f"SELECT id FROM cr_pdfs WHERE filename = '{pdf_name}'"
+    sqlstr = f"SELECT id from cr_pdfs where filename = '{pdf_name}'"
     curs.execute(sqlstr)
     resp = curs.fetchone()
     if resp: #pdf id already exists
+        print(f"PDF already in database: {pdf_name}")
         return resp[0]
 
-    import PyPDF2
-    pdf_h = PyPDF2.PdfFileReader(open(pdf_fp, 'rb'))
+    try:
+        pdf_h = PyPDF2.PdfFileReader(open(pdf_fp, 'rb'))
+    except:
+        print(f"{pdf_name} -- Could not get page count.")
+        return None
 
     sqlstr = """
       INSERT INTO cr_pdfs (batch_id, filename, page_count)
@@ -82,9 +86,9 @@ def insert_pdf_data(batch_id, pdf_name, pdf_fp):
 
 def get_batch_id(dbx_dir):
     sqlstr = f"SELECT id FROM cr_batch WHERE dropbox_path = '{dbx_dir}'"
-
     curs.execute(sqlstr)
     resp = curs.fetchone()
+
     if resp: #batch id already exists
         print("Batch already exists. Using old batch id..")
         batch_id = resp[0]

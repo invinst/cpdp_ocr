@@ -18,14 +18,14 @@ from colormath.color_objects import sRGBColor, LabColor
 from colormath.color_conversions import convert_color
 from colormath.color_diff import delta_e_cmc
 
-from smart_open import open
+#from smart_open import open
 
 from pdf2image import convert_from_path
 from PIL import Image
 
 import logging
 
-out_dir = './output'
+out_dir = './output/ocr'
 
 bg_colors =  (('light_blue', sRGBColor(240, 247, 255)), ('white', sRGBColor(255,255,255)), ('light_gray', sRGBColor(230,230,230)))
 
@@ -57,6 +57,7 @@ def derive_luminance(rgb):
     return (.2126*r) + (.587*g) + (.0722*b)
 
 def token_colors(token, img):
+    #TODO: the convert_color piece should be done before this somehow. 
     x1 = int(token['left']) - 2
     x2 = int(token['left']) + int(token['width']) + 2
     y1 = int(token['top']) - 2
@@ -122,13 +123,12 @@ def tsv_sql_data(fp):
 
     ret_tokens = []
 
-    for token in tsv_tokens:
-        bg_color, text_color, bg_canon = token_colors(token, img)
-        token['background_color'] = list(bg_color)
-        token['text_color'] = list(text_color)
-        token['background_color_name'] = bg_canon
-
-        ret_tokens.append(token)
+    #for token in tsv_tokens:
+    #    bg_color, text_color, bg_canon = token_colors(token, img)
+    #    token['background_color'] = list(bg_color)
+    #    token['text_color'] = list(text_color)
+    #    token['background_color_name'] = bg_canon
+    #    ret_tokens.append(token)
 
     ret_tokens = tsv_tokens
     print(ret_tokens)
@@ -145,6 +145,7 @@ def mod_brightcontrast(img, brightness, contrast):
     return img
 
 def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
+    print("starting removal of redaction")
     blurred_image = cv2.GaussianBlur(raw_image, (5,5), 0)
     gray_image = cv2.cvtColor(blurred_image, cv2.COLOR_BGR2GRAY)
     (thresh, bw_image) = cv2.threshold(gray_image, 85, bw_thresh[1], cv2.THRESH_BINARY)
@@ -154,6 +155,7 @@ def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
 
     redaction_contours = []
     for contour in contours:
+        contour_area = cv2.contourArea(contour)
         if cv2.contourArea(contour) < 300:
             continue
 
@@ -167,6 +169,11 @@ def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
             continue
 
         contour_x, contour_y, contour_w, contour_h = cv2.boundingRect(approx)
+        bounding_box_area = contour_w * contour_h
+
+        if contour_area < bounding_box_area*.4: #check to see if contour is much smaller
+            continue
+
         if contour_h == raw_image.shape[0] and contour_w == raw_image.shape[1]:
             continue
 
@@ -177,10 +184,11 @@ def remove_redactions(raw_image, bw_thresh=(85, 255), approx_val=.026):
         cv2.drawContours(raw_image, redaction_contours, i, color=(255,255,255), thickness=cv2.FILLED)
         cv2.drawContours(raw_image, redaction_contours, i, color=(255,255,255), thickness=4)
 
+    print("done with redaction cleanup")
+
     return raw_image
 
-
-def ocr_file(filename, page_count=None, pages=[], brightness=30, contrast=30, no_redactions=True):
+def ocr_file(filename, page_count=None, pages=[], brightness=30, contrast=30, no_redactions=False):
     pdf_path = f'./input/{filename}'
 
     file_basename = os.path.basename(pdf_path)
@@ -227,10 +235,11 @@ def ocr_file(filename, page_count=None, pages=[], brightness=30, contrast=30, no
         cv2.imwrite(out_fp, page_image)
 
         page_num += 1
-    insert_ocr_file(filename, len(page_images))
+
+    print(f"{file_basename} Finished writing OCR to disk, writing to database")
 
 def output_dir_finished(filename, page_count):
-    output_dir = f'./output/{filename}'
+    output_dir = f'./output/ocr/{filename}'
     if not os.path.exists(output_dir):
         return False
 
@@ -247,19 +256,19 @@ def output_dir_finished(filename, page_count):
     return True
 
 def get_input_files():
-    sqlstr = "SELECT filename, page_count FROM cr_pdfs"
+    sqlstr = """SELECT filename, page_count FROM cr_pdfs order by page_count desc"""
     curs.execute(sqlstr)
 
     return list(curs.fetchall())
 
 def get_pending_pdfs(input_files):
-    existing_files = os.listdir('./output')
+    existing_files = os.listdir('./output/ocr')
     pending_files = []
     for filename, page_count in input_files:
         is_finished = output_dir_finished(filename, page_count)
 
         if not is_finished:
-            pending_files.append(filename, page_count)
+            pending_files.append((filename, page_count))
 
     return pending_files
 
@@ -270,7 +279,7 @@ def insert_ocr_file(filename, page_count):
 
     print('Inserting..', filename)
     for page_num in range(1, page_count+1):
-        page_fp = f'./output/{filename}/{filename}.{page_num}.txt'
+        page_fp = f'./output/ocr/{filename}/{filename}.{page_num}.txt'
         with open(page_fp, 'r') as fh:
             ocr_text = fh.read()
 
@@ -330,12 +339,12 @@ def insert_ocr_files(input_files):
 logger = mp.log_to_stderr
  
 input_files = get_input_files()
-pending_files = get_pending_pdfs(input_files)
-print("Done: ", len(input_files) - len(pending_files))
-print("Pending files: ", len(pending_files))
+pending_pdfs = get_pending_pdfs(input_files)
+print("Done: ", len(input_files) - len(pending_pdfs))
+print("Pending files: ", len(pending_pdfs))
 
-pool = mp.Pool(processes=30)
-pool.map(ocr_file, pending_files, chunksize=1)
+pool = mp.Pool(processes=12)
+pool.starmap(ocr_file, pending_pdfs, chunksize=8)
 
 print(type(input_files))
 insert_ocr_files(input_files)   
