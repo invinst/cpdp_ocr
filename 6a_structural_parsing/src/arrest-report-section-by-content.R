@@ -26,7 +26,7 @@ match_hint <- function(words, hint) {
 
 sec_runs <- function(data) {
     arrange(data, line_top, block_num, par_num, line_num) %>%
-        mutate_at(vars(starts_with("sec")), cumsum)
+        mutate_at(vars(starts_with("sec")), cummax)
 }
 
 ####

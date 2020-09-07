@@ -1,2 +1,3 @@
 *.sql.gz
 output
+.DS_Store
