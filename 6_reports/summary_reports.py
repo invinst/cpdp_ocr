@@ -28,7 +28,7 @@ query = f"""
     FROM    cr_summary_data sd,
 	    cr_pdfs p, 
 	    cr_pdf_pages pp,
-	    cr_foia_batch fb
+	    cr_batch fb
 	    
     WHERE   sd.page_id = pp.id
     AND     p.id = pp.pdf_id
@@ -44,6 +44,8 @@ query = f"""
 
 cursor.execute(query)
 results = list(cursor.fetchall())
+
+print("Number of narratives: ", len(results))
 
 with open('./output/narratives.csv', 'w') as fh:
     w = csv.writer(fh)

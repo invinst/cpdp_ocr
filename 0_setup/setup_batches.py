@@ -9,7 +9,7 @@ from zipfile import ZipFile
 import os
 import re
 
-from PyPDF2 import PdfFileReader
+import PyPDF2
 
 def pg_conn(db_name='cpdp', db_host='localhost', db_user='cpdp', db_pass='cpdp'):
     vals = dict(db_name=db_name, db_host=db_host, db_user=db_user, db_pass=db_pass)
@@ -59,19 +59,24 @@ class dropbox_handler:
         return out_fp
 
 def insert_pdf_data(batch_id, pdf_name, pdf_fp):
-    sqlstr = f"SELECT id FROM cr_pdfs WHERE filename = '{pdf_name}'"
+    sqlstr = f"SELECT id from cr_pdfs where filename = '{pdf_name}'"
     curs.execute(sqlstr)
     resp = curs.fetchone()
     if resp: #pdf id already exists
-        print("PDF already inserted. Inserting old pdf..")
-        #return resp[0]
+        print(f"PDF already in database: {pdf_name}")
+        return resp[0]
 
-    import PyPDF2
-    pdf_h = PyPDF2.PdfFileReader(open(pdf_fp, 'rb'))
+    try:
+        pdf_h = PyPDF2.PdfFileReader(open(pdf_fp, 'rb'))
+    except:
+        print(f"{pdf_name} -- Could not get page count.")
+        return None
 
     sqlstr = """
       INSERT INTO cr_pdfs (batch_id, filename, page_count)
-      VALUES (%s, %s, %s) returning id
+      VALUES (%s, %s, %s)
+      ON CONFLICT DO NOTHING
+      RETURNING id
     """
 
     curs.execute(sqlstr, (batch_id, pdf_name, pdf_h.getNumPages()))
@@ -80,15 +85,20 @@ def insert_pdf_data(batch_id, pdf_name, pdf_fp):
     return pdf_id
 
 def get_batch_id(dbx_dir):
-    sqlstr = f"SELECT id FROM cr_foia_batch WHERE dropbox_path = '{dbx_dir}'"
-
+    sqlstr = f"SELECT id FROM cr_batch WHERE dropbox_path = '{dbx_dir}'"
     curs.execute(sqlstr)
     resp = curs.fetchone()
+
     if resp: #batch id already exists
         print("Batch already exists. Using old batch id..")
         batch_id = resp[0]
     else:
-        sqlstr = f"INSERT INTO cr_foia_batch (dropbox_path) VALUES ('{dbx_dir}') returning id"
+        sqlstr = f"""
+          INSERT INTO cr_batch (dropbox_path) 
+          VALUES ('{dbx_dir}') 
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        """
         curs.execute(sqlstr, (dbx_dir))
 
         resp = curs.fetchone()
@@ -108,13 +118,15 @@ def prepare_batches(fp='../batches.txt'):
         dir_files = dbx_h.list_files(dbx_dir)
         dir_files = [d for d in dir_files if d.endswith('pdf')]
 
+        print(len(dir_files))
+
         for pdf_name in dir_files:
             pdf_fp = dbx_h.download_file(dbx_path=dbx_dir, filename=pdf_name)
             insert_pdf_data(batch_id, pdf_name, pdf_fp)
 
         conn.commit()
 
-conn = pg_conn() #global
-curs = conn.cursor() #global
+conn = pg_conn()
+curs = conn.cursor()
                   
 prepare_batches()
