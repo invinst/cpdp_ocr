@@ -4,36 +4,46 @@
 # Maintainers: TS
 # Copyright:   2020, HRDAG, GPL v2 or later
 # =========================================
-# cpdp_ocr/6a_structural_parsing/arrest-reports/src/section-by-position.R
+# cpdp_ocr/6a_structural_parsing/arrest-reports/features/src/extract-headings.R
 
 library(pacman)
 pacman::p_load(argparse, feather, dplyr, rlang,
-               tidyr, purrr, stringr, stringdist, readr)
-
+               tidyr, purrr, stringr, stringdist)
 
 parser <- ArgumentParser()
-parser$add_argument("--input")
-parser$add_argument("--sections")
+parser$add_argument("--input", default = "input/arrest-reports-lines.feather")
 parser$add_argument("--output")
 args <- parser$parse_args()
 
 ####
 
-docs <- read_feather(args$input)
+KNOWN_SECTIONS <- c(
+    reporting_personnel      = "REPORTING PERSONNEL",
+    lockup_keeper_processing = "LOCKUP KEEPER PROCESSING",
+    visitor_log              = "VISITOR LOG",
+    movement_log             = "MOVEMENT LOG",
+    wc_comments              = "WC COMMENTS",
+    processing_personnel     = "PROCESSING PERSONNEL",
+    recovered_narcotics      = "RECOVERED NARCOTICS",
+    warrant                  = "WARRANT",
+    offender                 = "OFFENDER",
+    non_offenders            = "NON-OFFENDER(S)",
+    arrestee_vehicle         = "ARRESTEE VEHICLE",
+    properties               = "PROPERTIES",
+    incident_narrative       = "INCIDENT NARRATIVE",
+    incident                 = "INCIDENT",
+    court_info               = "COURT INFO",
+    interview_log            = "INTERVIEW LOG",
+    charges                  = "CHARGES",
+    felony_review            = "FELONY REVIEW"
+)
 
-section_info <- read_delim(args$sections, delim = "|",
-                             na = "", col_types = 'ccc') %>%
-    filter(!is.na(label))
-
-known_sections <- structure(section_info$label, names = section_info$section)
+### functions ##
 
 # finds vertically oriented text on the left margin of the page
 is_heading <- function(height, width, left) {
     height > width & left + width < 110
 }
-
-bottom_of <- function(top, height) top + height
-extent_of <- function(left, width) left + width
 
 cleanup_header <- function(hdr) {
     str_replace_all(hdr, "[^ -~]", "") %>% str_replace_all("[0-9]", "")
@@ -48,7 +58,7 @@ clarify <- function(raw_data) {
 }
 
 best_match <- function(observed, expected) {
-    candidates <- clarify(observed$header)
+    candidates <- clarify(observed$text)
     distances <- map(expected,
                      ~stringdist(candidates, ., method = "cosine", q = 4))
     dict <- tibble(observed = candidates,
@@ -60,10 +70,10 @@ best_match <- function(observed, expected) {
         filter(distance <= min(distance),
                distance < .7) %>%
         ungroup %>%
-        transmute(observed, section_name = candidate)
-    observed %>% mutate(matchable = cleanup_header(header)) %>%
+        transmute(observed, heading = candidate)
+    observed %>% mutate(matchable = cleanup_header(text)) %>%
         inner_join(dict, by = c(matchable = "observed")) %>%
-        distinct(pdf_id, page_num, section_name, lab_top, lab_bottom)
+        distinct(pdf_id, page_num, heading, lab_top, lab_bottom)
 }
 
 has_overlaps <- function(labs) {
@@ -83,7 +93,7 @@ combine_overlapping <- function(labs) {
         mutate(group_id = cumsum(!overlap)) %>%
         mutate(lab_top = ifelse(overlap, lag(lab_top, 1), lab_top)) %>%
         group_by(pdf_id, page_num, group_id) %>%
-    summarise(header  = paste(header, collapse = " "),
+    summarise(text  = paste(text, collapse = " "),
               lab_top     = min(lab_top),
               lab_bottom  = max(lab_bottom),
               lab_left    = min(lab_left),
@@ -93,40 +103,22 @@ combine_overlapping <- function(labs) {
 
 ###
 
-arrest_reports <- filter(docs, page_classification == "ARREST Report") %>%
-    mutate(bottom = bottom_of(top_bound, height_bound),
-           right  = extent_of(left_bound, width_bound)) %>%
-    group_by(pdf_id, page_num, block_num, par_num, line_num) %>%
-    mutate(line_top = min(top_bound), line_bottom = max(bottom)) %>%
-    ungroup %>%
-    select(pdf_id, page_num, contains("_bound"), text,
-           bottom, right,
-           block_num, par_num, line_num, word_num,
-           line_top, line_bottom)
+arrest_reports <- read_feather(args$input)
 
-observed_labels <- arrest_reports %>%
-    arrange(pdf_id, page_num, block_num, par_num, line_num, word_num) %>%
-    group_by(pdf_id, page_num, block_num, par_num, line_num) %>%
-    summarise(header  = paste(text, collapse = " "),
-              line_top = min(line_top),
-              line_bottom = max(line_bottom),
-              line_left    = min(left_bound),
-              line_right   = max(right),
-              .groups = "drop") %>%
+heading_candidates <- arrest_reports %>%
     filter(is_heading(height = line_bottom - line_top,
                       width  = line_right - line_left,
                       left   = line_left)) %>%
     mutate(lab_top = line_top, lab_bottom = line_bottom,
            lab_left = line_left, lab_right = line_right)
 
-while(has_overlaps(observed_labels)) {
-    observed_labels <- combine_overlapping(observed_labels)
+while(has_overlaps(heading_candidates)) {
+    heading_candidates <- combine_overlapping(heading_candidates)
 }
 
-observed_labels <- observed_labels %>%
-    filter(lab_bottom - lab_top > 100)
+heading_candidates <- filter(heading_candidates, lab_bottom - lab_top > 100)
 
-arrest_report_sections <- best_match(observed_labels, known_sections)
+arrest_report_sections <- best_match(heading_candidates, KNOWN_SECTIONS)
 
 check <- arrest_report_sections %>%
     count(pdf_id, page_num, lab_top) %>%
@@ -135,13 +127,13 @@ stopifnot(check == 1L)
 
 out <- arrest_reports %>%
     left_join(arrest_report_sections, by = c("pdf_id", "page_num")) %>%
-    filter(line_top >= lab_top, line_bottom <= lab_bottom) %>%
-    distinct(pdf_id, page_num,
-             block_num, par_num, line_num,
-             section = section_name)
+    filter(line_top >= lab_top, line_bottom <= lab_bottom,
+           line_top < Inf, line_bottom > -Inf) %>%
+    distinct(filename, pdf_id, page_num,
+             block_num, par_num, line_num, heading)
 
 exceptions <- out %>%
-    group_by(pdf_id, page_num, block_num, par_num, line_num) %>%
+    group_by(pdf_id, filename, page_num, block_num, par_num, line_num) %>%
     filter(n() > 1)
 
 stopifnot(nrow(exceptions) == 0)

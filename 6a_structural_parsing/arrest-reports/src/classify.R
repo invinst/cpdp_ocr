@@ -4,16 +4,17 @@
 # Maintainers: TS
 # Copyright:   2020, HRDAG, GPL v2 or later
 # =========================================
-# cpdp_ocr/6a_structural_parsing/arrest-reports/src/train-classifier.R
+# cpdp_ocr/6a_structural_parsing/arrest-reports/src/classify.R
 
 library(pacman)
-pacman::p_load(argparse, feather, dplyr, rlang, topicmodels,
+pacman::p_load(argparse, feather, dplyr, rlang, topicmodels, randomForest,
                tidytext, tidyr, purrr, stringr, stringdist, readr)
 
 
 parser <- ArgumentParser()
-parser$add_argument("--trainingdir", default = "hand/section-labels-training-data")
+parser$add_argument("--input")
 parser$add_argument("--topics", default = "output/lda-model.rds")
+parser$add_argument("--classifier", default = "output/model-classify-section.rds")
 parser$add_argument("--output")
 args <- parser$parse_args()
 
@@ -28,50 +29,24 @@ is_legible <- function(txt)
 
 topic_mod <- readRDS(args$topics)
 
+arrest_reports <- read_feather(args$input) %>%
+    filter(page_classification == "ARREST Report")
 
-test_ids <- c(22108, 22144, 19689, 20461)
+arr_lines <- arrest_reports %>%
+    mutate(height_bound = ifelse(height_bound > 2000, 1, height_bound)) %>%
+    arrange(pdf_id, page_num, block_num, par_num, line_num, word_num) %>%
+    group_by(pdf_id, filename, page_num, block_num, par_num, line_num) %>%
+    summarise(text = paste(text, collapse = " "),
+              line_top = min(top_bound),
+              line_bottom = max(top_bound + height_bound),
+              line_left = min(left_bound),
+              line_right = max(left_bound + width_bound),
+              .groups = "drop")
 
-poss_labels <- c(
-    "arrestee_vehicle", "charges", "court_info", "felony_review",
-    "footer", "header", "incident", "incident_narrative", "interview_log",
-    "lockup_keeper_processing", "longline", "movement_log", "non_offenders",
-    "offender", "processing_personnel", "properties", "recovered_narcotics",
-    "reporting_personnel", "visitor_log", "warrant", "wc_comments"
-)
-
-training_labels <- list.files(args$trainingdir, full.names = TRUE,
-                              include.dirs = FALSE, pattern = "*.csv") %>%
-    map(read_delim, delim = "|", na = "",
-        col_types = cols(.default = col_character(),
-                         pdf_id = col_integer(),
-                         docid = col_integer(),
-                         page_num = col_integer(),
-                         block_num = col_integer(),
-                         par_num = col_integer(),
-                         line_num = col_integer(),
-                         line_top = col_double(),
-                         line_bottom = col_double(),
-                         line_left = col_double(),
-                         line_right = col_double())) %>%
-    map_dfr(select, pdf_id, filename, docid,
-            ends_with("_num"), starts_with("line_"),
-            text, label) %>%
-    # was originally trying to separate sections of header, but no longer
-    mutate(label = ifelse(str_detect(label, "^header"), "header", label))
-
-
-
-stopifnot(length(setdiff(training_labels$label, poss_labels)) == 0)
-
-training_labels <- training_labels %>%
-    mutate(label = factor(label, levels = poss_labels))
-
-
-
-position_features <- pos_funs$docs2label(training_labels) %>%
+position_features <- pos_funs$docs2label(arr_lines) %>%
     rename(p_lab = section)
 
-dtm <- training_labels %>%
+arr_dtm <- arr_lines %>%
     unnest_tokens(word, text) %>%
     filter(word %in% topic_mod@terms) %>%
     mutate(identifier = paste(pdf_id, page_num, block_num,
@@ -79,19 +54,21 @@ dtm <- training_labels %>%
     count(identifier, word) %>%
     cast_dtm(identifier, word, n)
 
-topix <- topicmodels::posterior(topic_mod, newdata = dtm)
-topix_df <- as_tibble(topix$topics, rownames = "identifier") %>%
+arr_topics <- topicmodels::posterior(topic_mod, newdata = arr_dtm)
+arr_topics_df <- as_tibble(arr_topics$topics, rownames = "identifier") %>%
     set_names(~paste0("t_", .)) %>%
     separate(t_identifier,
              into = c("pdf_id", "page_num", "block_num",
                       "par_num", "line_num"), sep = "_") %>%
     mutate_at(vars(pdf_id, contains("_num")), as.integer)
 
-processed <- training_labels %>%
+## other hints
+
+processed_arr_lines <- arr_lines %>%
     left_join(position_features,
               by = c("pdf_id", "filename",
                      "page_num", "block_num", "par_num", "line_num")) %>%
-    left_join(topix_df,
+    left_join(arr_topics_df,
               by = c("pdf_id", "page_num",
                      "block_num", "par_num", "line_num")) %>%
     mutate(p_lab = replace_na(p_lab, "NODATA")) %>%
@@ -115,7 +92,7 @@ processed <- training_labels %>%
     filter(line_right > 110, is_legible(text)) %>%
     select(-text)
 
-processed <- processed %>%
+processed_arr_lines <- processed_arr_lines %>%
     arrange(pdf_id, page_num, line_top, block_num, par_num, line_num) %>%
     group_by(pdf_id) %>%
     mutate(last_page = lag(page_num, 1)) %>%
@@ -130,43 +107,30 @@ processed <- processed %>%
     select(-new_document, -last_page) %>%
     select(pdf_id, filename, docid, everything())
 
-processed <- processed %>%
+processed_arr_lines <- processed_arr_lines %>%
     group_by(docid) %>%
     mutate(across(starts_with("re_"), cumsum, .names = "cum_{col}")) %>%
     ungroup
 
-processed <- processed %>%
+processed_arr_lines <- processed_arr_lines %>%
     arrange(docid, page_num, line_top, block_num, par_num, line_num) %>%
     group_by(docid, page_num) %>%
     mutate(line_gap = line_top - lag(line_bottom, 1)) %>%
     replace_na(list(line_gap = 0)) %>%
     ungroup
 
-processed <- processed %>%
-    mutate(identifier = paste(pdf_id, page_num, block_num,
-                              par_num, line_num, collapse = "_"))
+processed_arr_lines <- processed_arr_lines %>%
+    mutate(identifier = paste(docid, page_num, block_num, par_num, line_num,
+                              sep = "_"))
 
-train_ids <- setdiff(training_labels$pdf_id, test_ids)
+classifier <- readRDS(args$classifier)
+system.time(
+bloop <- processed_arr_lines %>%
+    mutate(label = predict(classifier, newdata = .))
+)
 
-train <- filter(processed, pdf_id %in% train_ids)
-test <- filter(processed, pdf_id %in% test_ids)
-
-modfit <- randomForest(
-    label ~ . - pdf_id - page_num - block_num - par_num -
-        line_num - docid - filename - identifier,
-    data = train)
-
-as_tibble(importance(modfit), rownames="variable") %>%
-    arrange(desc(MeanDecreaseGini)) %>% print(n = Inf)
-
-test %>%
-    mutate(predrf = predict(modfit, newdata = .)) %>%
-    select(label, predrf, pdf_id, docid, page_num, block_num, par_num, line_num) %>%
-    left_join(training_labels %>% select(pdf_id, ends_with("_num"), text),
-              by = c("pdf_id", "page_num", "block_num", "par_num", "line_num")) %>%
-    mutate(correct = label == predrf) %>%
-    filter(label == "warrant")
-    group_by(label) %>% summarise(m = sum(correct), out_of = n())
-
-
-
+bloop %>%
+    select(pdf_id, docid, filename, ends_with("_num"), label) %>%
+    left_join(arr_lines,
+              by = c("pdf_id", "filename", "page_num",
+                     "block_num", "par_num", "line_num"))

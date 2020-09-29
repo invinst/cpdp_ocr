@@ -65,13 +65,13 @@ train_ids <- setdiff(training_labels$pdf_id, test_ids)
 
 arr <- read_feather(args$input) %>%
     filter(page_classification == "ARREST Report") %>%
-    select(id, pdf_id, page_num, contains("_bound"), text,
+    select(id, pdf_id, filename, page_num, contains("_bound"), text,
            block_num, par_num, line_num, word_num)
 
 arr_lines <- arr %>%
     mutate(top_bound = ifelse(top_bound <= 0, NA, top_bound)) %>%
     arrange(pdf_id, page_num, block_num, par_num, line_num, word_num) %>%
-    group_by(pdf_id, page_num, block_num, par_num, line_num) %>%
+    group_by(pdf_id, filename, page_num, block_num, par_num, line_num) %>%
     summarise(text = paste(text, collapse = " "),
               line_top = min(top_bound, na.rm = TRUE),
               line_bottom = max(top_bound + height_bound, na.rm = TRUE),
@@ -102,11 +102,29 @@ arr_lines <- arr_lines %>%
     mutate(docid = cumsum(new_document)) %>%
     select(-new_document, -last_page)
 
+wc <- arr_lines %>%
+    mutate(identifier = paste(docid, page_num, block_num, par_num, line_num,
+                              sep = "_")) %>%
+    unnest_tokens(word, text, token = "words") %>%
+    filter(!str_detect(word, "[0-9]")) %>%
+    anti_join(stop_words, by = "word") %>%
+    count(identifier, word)
+
+wc_dtm <- cast_dtm(wc, identifier, word, n)
+system.time(wc_lda <- LDA(wc_dtm, k = 25, control = list(seed = 19481210)))
+
 ####
 
 labeled_data <- training_labels %>%
     inner_join(arr_lines, by = c("pdf_id", "page_num", "block_num",
                                  "par_num", "line_num"))
+
+labeled_data %>%
+    select(pdf_id, filename, docid,
+           page_num, block_num, par_num, line_num,
+           line_top, line_bottom, line_left, line_right,
+           text, label) %>%
+    write_delim("hand/section-labels-training-data/sec-class-training-0.csv", delim = "|", na = "")
 
 #### build features from most common words in each section
 # note: only using the training set to generate these features

@@ -1,0 +1,36 @@
+# vim: set ts=4 softtabstop=0 sw=4 si fileencoding=utf-8:
+#
+# Authors:     TS
+# Maintainers: TS
+# Copyright:   2020, HRDAG, GPL v2 or later
+# =========================================
+# cpdp_ocr/6a_structural_parsing/arrest-reports/features/src/train-topic-model.R
+
+library(pacman)
+pacman::p_load(argparse, dplyr, tidytext, tm, topicmodels, readr, logger)
+
+parser <- ArgumentParser()
+parser$add_argument("--wordcounts", default = "frozen/doc-word-counts.csv.gz")
+parser$add_argument("--output")
+args <- parser$parse_args()
+
+wc <- read_delim(args$wordcounts,
+                 delim = "|", na = "",
+                 col_types = cols(
+                     identifier = col_character(),
+                     word = col_character(),
+                     n = col_integer()))
+
+
+wtm <- cast_dtm(wc, identifier, word, n)
+
+log_info("starting estimation for LDA model")
+lda <- LDA(wtm, k = 25, control = list(seed = 19481210))
+log_info("completed estimation for LDA model")
+
+log_info("n_topics  : ", lda@k)
+log_info("perplexity: ", perplexity(lda))
+
+saveRDS(lda, args$output)
+
+# done.
