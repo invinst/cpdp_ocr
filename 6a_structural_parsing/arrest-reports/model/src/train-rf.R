@@ -34,11 +34,19 @@ fit <- randomForest(
     y = train$label,
     x = train %>%
         select(line_top, line_bottom, line_left, line_right,
-               matches("(^|_)re_"), matches("(^|_)t_"))
+               heading,
+               matches("(^|_)re_"), matches("(^|_)t_")) %>%
+        mutate(across(matches("(^|_)re_"), ~replace_na(., 0)))
 )
 log_info("done fitting rf model")
 
 performance <- test %>%
+    select(pdf_id, docid, page_num,
+           block_num, par_num, line_num,
+           line_top, line_bottom, line_left, line_right,
+           heading, label,
+           matches("(^|_)re_"), matches("(^|_)t_")) %>%
+    mutate(across(matches("(^|_)re_"), ~replace_na(., 0))) %>%
     mutate(pred = predict(fit, newdata = .)) %>%
     select(label, pred, pdf_id, docid, page_num, block_num, par_num, line_num) %>%
     mutate(correct = label == pred) %>%
@@ -49,6 +57,8 @@ performance <- test %>%
 log_info("performance on held out test data, by category:")
 walk2(as.character(performance$label), performance$smry,
       ~log_info(.x, ": ", .y))
+log_info("overall performance: ",
+         sum(performance$correct), "/", sum(performance$out_of))
 
 saveRDS(fit, args$output)
 
