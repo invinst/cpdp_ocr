@@ -25,9 +25,10 @@ output/all-arr-lines.feather: \
 
 output/training-arr-lines.feather: \
 		src/import-training-data.R \
+		frozen/training-data-info.csv \
 		$(trainingfiles)
 	Rscript --vanilla $< \
-		--inputdir=frozen/section-labels-training-data \
-		--output=$@
+		--info=frozen/training-data-info.csv \
+		--output=$@ > output/training-data-summary.txt
 
 # done.
