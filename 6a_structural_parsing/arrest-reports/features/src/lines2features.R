@@ -22,7 +22,7 @@ pacman::p_load(
 
 
 parser <- ArgumentParser()
-parser$add_argument("--input", default = "input/labeled-arrest-report-lines.feather")
+parser$add_argument("--input", default = "input/training-arr-lines.feather")
 parser$add_argument("--topics", default = "output/lda-model.rds")
 parser$add_argument("--posheadings", default = "output/training-headings.feather")
 parser$add_argument("--regexes", default = "hand/regexes.yaml")
@@ -58,6 +58,15 @@ arr_topics_df <- as_tibble(arr_topics$topics, rownames = "identifier") %>%
                       "par_num", "line_num"), sep = "_") %>%
     mutate_at(vars(pdf_id, contains("_num")), as.integer)
 
+arr_topics_top <- arr_topics_df %>%
+    pivot_longer(starts_with("t_"), names_to = "topic") %>%
+    group_by(pdf_id, page_num, block_num, par_num, line_num) %>%
+    slice_max(value, n = 1, with_ties = F) %>%
+    ungroup %>%
+    select(-value) %>%
+    mutate(colname = "topic") %>%
+    pivot_wider(names_from = colname, values_from = topic)
+
 ####
 # regex-based features
 
@@ -74,21 +83,37 @@ feats <- arr %>%
     left_join(arr_topics_df,
               by = c("pdf_id", "page_num",
                      "block_num", "par_num", "line_num")) %>%
+    left_join(arr_topics_top,
+              by = c("pdf_id", "page_num", "block_num",
+                     "par_num", "line_num")) %>%
     mutate_at(vars(starts_with("t_")), ~replace_na(., 0)) %>%
     mutate(heading = replace_na(heading, "NODATA")) %>%
     filter(is_legible(text))
 
 ####
-# layout-based and page-global features
+# layout-based global features
 feats <- feats %>%
+    mutate(pos_top = as.integer(line_bottom < 165),
+           pos_bot = as.integer(line_top > 2000),
+           pos_rt1 = as.integer(line_left > 400),
+           pos_rt2 = as.integer(line_left > 700)) %>%
+    arrange(docid, page_num, line_top, block_num, par_num, line_num) %>%
     group_by(docid) %>%
     mutate(across(starts_with("re_"), cummax, .names = "cum_{col}"),
            across(starts_with("re_"),    max, .names = "pg_{col}")) %>%
     ungroup %>%
-    arrange(docid, page_num, line_top, block_num, par_num, line_num) %>%
     group_by(docid, page_num) %>%
     mutate(line_gap = line_top - lag(line_bottom, 1)) %>%
     replace_na(list(line_gap = 0)) %>%
+    filter(line_right >= 110)
+
+# page & neighborhood level features
+feats <- feats %>%
+    group_by(pdf_id, page_num) %>%
+    mutate(across(c(topic, heading, starts_with("re_")),
+                  list(prv_1 = ~lag(., 1), prv_2 = ~lag(., 2),
+                       nxt_1 = ~lead(., 1), nxt_2 = ~lead(., 2)),
+                  .names = "{fn}_{col}")) %>%
     ungroup
 
 write_feather(feats, args$output)
