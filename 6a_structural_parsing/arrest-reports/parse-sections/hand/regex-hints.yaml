@@ -1,0 +1,81 @@
+offender_left:
+    age:
+        regexp: "AGE\\:\\s*([0-9]+) y"
+        index: 2
+    armed_with:
+        regexp: "ARMED WITH (.+)$"
+        index: 2
+
+offender_right:
+    sex:
+        regexp: "^(Male)|(Female)"
+        index: 1
+    eyes:
+        regex: "^(.+) Eyes$"
+        index: 2
+    hair:
+        regex: "^(.+) Hair$"
+        index: 2
+    hairstyle:
+        regex: "^(.+) Hair Style"
+        index: 2
+    complexion:
+        regex: "^(.+) Complexion"
+        index: 2
+    height:
+        regex: "^[0-9]\\' .+$"
+        index: 1
+    weight:
+        regex: "^([0-9]+) [ilIL]bs"
+        index: 2
+
+incident_left:
+    arrest_date:
+        regex: "rest Date\\:\\s?(.+)TRR"
+        index: 2
+    trr: 
+        regex: "TRR Completed\\? ([^\\s]+)"
+        index: 2
+    beat:
+        regex: "Beat\\: ([^\\s]+)"
+        index: 2
+    holding_facility:
+        regex: "Holding Facility\\:(.+)$"
+        index: 2
+    resisted:
+        regex: "Resisted Arrest\\?(.+)$"
+        index: 2
+
+incident_right:
+    n_arrested:
+        regex: "No Arrested\\s*\\:\\s*([0-9]+)"
+        index: 2
+    dcfs_ward:
+        regex: "Ward\\s*\\?(.+)$"
+        index: 2
+    dependent_children:
+        regex: "Children\\s*\\?\\s*([^\\s]+)$"
+        index: 2
+
+court_info_left:
+    court_date:
+        regex: "Desired Court Date\\:(.+)$"
+        index: 2
+    ct_sgt_handle:
+        regex: "Handle\\?(.+)$"
+        index: 2
+    init_court_date:
+        regex: "Initial Court Date\\:(.+)$"
+        index: 2
+
+court_info_right:
+    bond_date:
+        regex: "Bond Date\\:(.+)$"
+        index: 2
+    bond_type:
+        regex: "Type\\:(.+)$"
+        index: 2
+    bond_amount:
+        regex: "Amount\\:(.+)$"
+        index: 2
+
