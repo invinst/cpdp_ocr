@@ -97,12 +97,13 @@ field_value_candidates <- function(raw_form, fv_pattern, known_fields) {
                      names_to = "candidate", values_to = "distance")
 }
 
-select_best <- function(candidates) {
+select_best <- function(candidates, ...) {
     candidates %>%
-        group_by(document_id, page_num, field, value) %>%
+        rename(orig_field = field) %>%
+        group_by(document_id, page_num, orig_field, value) %>%
         filter(distance == min(distance)) %>% ungroup %>%
         transmute(document_id, filename, page_num,
-                  field = candidate, value)
+                  field = candidate, value, ...)
 }
 
 ###
@@ -134,6 +135,26 @@ lkr_rh_fields <- list(
     taking_medication = "presently taking medication",
     pregnant          = "(if female)are you pregnant",
     trans_gnc         = "transgender/intersex/gender non-conforming"
+)
+
+pp_fields <- list(
+    searched_by                 = "searched by",
+    lockup_keeper               = "lockup keeper",
+    arresting_officer           = "arresting officer",
+    attesting_officer           = "attesting officer",
+    assisting_arresting_officer = "assisting arresting officer",
+    first_arresting_officer     = "1st arresting officer",
+    second_arresting_officer    = "2nd arresting officer",
+    fingerprinted_by            = "fingerprinted by",
+    fingerprint_received_by     = "fingerprint received by",
+    final_approval              = "final approval of charges"
+)
+
+rp_fields <- list(
+    first_arresting_officer  = "1st arresting officer",
+    second_arresting_officer = "2nd arresting officer",
+    attesting_officer        = "attesting officer",
+    approval_prob_cause      = "approval of probable cause"
 )
 
 log_info("loaded ", nrow(arr), " rows of arrest report data")
@@ -273,11 +294,65 @@ log_info("lockup keeper processing: ", nrow(lkr))
 
 ##### processing personnel ####
 
-arr %>%
-    filter(section == "processing_personnel")
+processing_personnel <- arr %>%
+    filter(section == "processing_personnel") %>%
+    field_value_candidates(fv_pattern = "^([^:]+):(.+)$",
+                           known_fields = pp_fields) %>%
+    filter(distance < .5) %>%
+    select_best(orig_field, distance) %>%
+    rename(role = field) %>%
+    mutate(ambiguous = !str_detect(orig_field, "(arrest)|(attest)") &
+           str_detect(role, "(arresting)|(attesting)")) %>%
+    mutate(role = ifelse(ambiguous, "officer", role)) %>%
+    distinct(document_id, filename, page_num, role, value)
 
 
 #### reporting personnel #####
-arr %>%
-    filter(section == "reporting_personnel")
+reporting_personnel <- arr %>%
+    filter(section == "reporting_personnel") %>%
+    field_value_candidates(fv_pattern = "^([^:]+):(.+)$",
+                           known_fields = rp_fields) %>%
+    filter(distance < .5) %>%
+    select_best(orig_field, distance) %>%
+    rename(role = field) %>%
+    mutate(ambiguous = !str_detect(orig_field, "(arrest)|(attest)") &
+           str_detect(role, "(arresting)|(attesting)")) %>%
+    mutate(role = ifelse(ambiguous, "officer", role)) %>%
+    distinct(document_id, filename, page_num, role, value)
 
+#### charges ####
+# each row starts with number + "Offense as cited"
+
+charge_rows <- arr %>%
+    filter(section == "charges") %>%
+    sec2lines %>%
+    mutate(newrow = str_detect(text, "Offense") & str_detect(text, "Cited")) %>%
+    distinct(document_id, filename, page_num,
+             block_num, par_num, line_num, newrow) %>%
+    group_by(document_id, filename, page_num) %>%
+    mutate(charge_row = cumsum(newrow)) %>%
+    select(-newrow) %>% ungroup
+
+charges <- arr %>%
+    filter(section == "charges") %>%
+    #     filter(left_bound > 1000) %>%
+    inner_join(charge_rows,
+               by = c("document_id", "filename", "page_num",
+                      "block_num", "par_num", "line_num")) %>%
+    arrange(document_id, page_num, block_num, par_num, line_num, word_num) %>%
+    select(document_id, filename, ends_with("_num"),
+           left_bound, width_bound, text, charge_row) %>%
+    mutate(cited_loc = ifelse(text == "Cited", left_bound + width_bound, 0)) %>%
+    group_by(document_id, filename, page_num, charge_row) %>%
+    mutate(column = case_when(
+            between(left_bound, max(cited_loc), 1000) ~ "offense",
+            left_bound >= 1000 & text != "Victim" ~ "victim",
+            TRUE ~ "other"
+        )) %>% ungroup %>%
+    filter(column != "other") %>%
+    group_by(document_id, filename, page_num, charge_row, column) %>%
+    summarise(text = paste(text, collapse = " "), .groups = "drop") %>%
+    pivot_wider(names_from = column, values_from = text) %>%
+    select(-charge_row)
+
+# done.
