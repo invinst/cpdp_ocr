@@ -1,0 +1,70 @@
+re_iucr: IUCR
+re_occ: Ocurrence
+re_occdt: Ocurrence Date
+re_vic_u: VICTIM
+re_vic: Victim
+re_vicparen: "\\(Victim\\)"
+re_offparen: "\\(Offender\\)"
+re_unit: Unit
+re_sob: Sobriety
+re_beat: Beat
+re_sex: "(Male)|(Female)"
+re_age: "Age\\:"
+re_off: "OFFENDER\\(S\\)"
+re_sus: Suspect
+re_susno: "Suspect #"
+re_burg: Burglary
+re_prem: Premises
+re_prop: Property
+re_propno: "Property #"
+re_weapon: Weapon
+re_wpnusd: Weapon Used
+re_insmry: IN SUMMARY
+re_starno: Star No
+re_supno: Supervisor
+re_det: Detective
+re_empno: Emp No
+re_dob: DOB
+re_hair: Hair
+re_cmplxn: Complexion
+re_license: License
+re_vin: VIN
+re_igntn: Ignition
+re_lock: Locked
+re_szd: Seized
+re_rcvrd: Recovered
+re_flash: Flash
+re_misc: Miscellaneous
+re_vhcl: Vehicle
+re_brnd: Burned
+re_dest: Destroyed
+re_stln: Stolen
+re_tow: Towed
+re_event: EVENT
+re_fin: FINANCIAL
+re_roavl: RO Arrival
+re_inj: Injury
+re_injinfo: Injury Info
+re_cpd: Chicago Police Department
+re_cpd_u: CHICAGO POLICE DEPARTMENT
+re_rel: Relationship
+re_ocpnts: Occupants
+re_entpt: Entry Point
+re_extpt: Exit Point
+re_qty: Quantity
+re_mdl: Model
+re_ro1: Reporting Officer
+re_ro2: RO
+re_assnd: ASSIGNED
+re_susp: SUSPENDED
+re_rqtp: Request Type
+re_anm: Agency Name
+re_ntfcn: Notification
+re_htln: Hotline
+re_advs: Advised
+re_dmstc: Domestic
+re_frarm: Firearm
+re_serial: Serial
+re_caliber: Caliber
+re_barrel: Barrel
+re_invtry: Inventory

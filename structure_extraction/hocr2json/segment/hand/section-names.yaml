@@ -1,0 +1,17 @@
+incident: INCIDENT
+non_offender: NON OFFENDER
+injuries: INJURIES
+suspects: SUSPECTS
+relationship: RELATIONSHIP
+domestic_info: DOMESTIC INFO
+other: OTHER
+firearms: FIREARMS
+narrative: NARRATIVE
+personnel: PERSONNEL
+canvas_info: CANVAS INFORMATION
+notifications: NOTIFICATIONS
+other_properties: OTHER PROPERTIES
+gang_info: GANG INFO
+vehicle: VEHICLE
+vehicle_theft: VEHICLE THEFT
+worthless_document: WORTHLESS DOCUMENT
