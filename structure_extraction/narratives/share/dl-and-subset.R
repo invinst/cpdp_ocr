@@ -20,9 +20,9 @@ pacman::p_load(
 
 # command-line args {{{
 parser <- ArgumentParser()
-parser$add_argument("--pageclasses", default="input/CPD-44.112-A_samples.csv")
-parser$add_argument("--category", default="CPD-44.112-A")
-parser$add_argument("--token", default="frozen/auth-token.rds")
+parser$add_argument("--pageclasses")
+parser$add_argument("--category")
+parser$add_argument("--token")
 parser$add_argument("--outdir")
 args <- parser$parse_args()
 # }}}
